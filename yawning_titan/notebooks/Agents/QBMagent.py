@@ -4,6 +4,7 @@ from yawning_titan import _YT_ROOT_DIR
 
 # import DWAVE model and sampler
 import dimod
+import os
 # try:
 #     from dwave.system import LeapHybridSampler
 # except:
@@ -15,6 +16,7 @@ class QBMAgent:
 #   Functions:
 #   initRBM             - Initialises a reduced boltzmann machine
 #   initDBM             - Initialises a deep boltzmann machine
+#   loadWeights         - Initialises a generic BM based on saved weight .txt files. Assumes any zero weights are unconnected nodes
 #   buildHamiltonian    - Builds a hamiltonian to represent the free energy in the machine, either state and action, or state only are acceptable inputs
 #   calculateFreeEnergy - Calculates the free energy from the hamiltonian and samples of the hamiltonian
 #   evaluateQBM         - Evaluates the boltzmann machine - builds hamiltonian and calculates the energy
@@ -59,7 +61,9 @@ class QBMAgent:
             "ExpectedReward1": [],
             "GameAvgReward":[],
             "TotAvgReward":[],
-            "Qerror": []}
+            "Qerror": [],
+            "GameLength":[],
+            "GameReward":[]}
 
         # Internal counters
         self.steps = 0
@@ -79,8 +83,13 @@ class QBMAgent:
         self.pSwitch = 0.2 # Probability of each individual node switching
       
         # Set Stored Q maximums
-        self.Qvals = np.ones(shape=(2**(self.nObservations-1),self.nActions))*np.nan
-        self.stateMult = [2**i for i in range(self.nObservations)]
+        self.storeQ = self.nObservations<30
+        if not self.AnnealToBestAction and not self.storeQ:
+            print('Warning: too many observables to store Q values. ''AnnealToBestAction'' flag has been set to ''True''')
+            self.AnnealToBestAction = True
+        if self.storeQ:
+            self.Qvals = np.ones(shape=(2**(self.nObservations-1),self.nActions))*np.nan
+            self.stateMult = [2**i for i in range(self.nObservations)]
   
     def initRBM(self,hiddenNodes = 5):
         # Initialise an RBM with random weights, zero weight between hidden nodes
@@ -113,6 +122,15 @@ class QBMAgent:
             cumsum0 = cumsum1
         self.hhWeights = np.multiply(self.hhWeights,self.nonzeroHH)
 
+        self.QBMinitialised = True
+
+    def loadWeights(self,resultsDir):
+        self.hvWeights = os.path.join(resultsDir,'hvWeights.txt')
+        self.hhWeights = os.path.join(resultsDir,'hhWeights.txt')
+
+        self.nHidden = np.shape(self.hvWeights)[0]
+        self.nonzeroHV = (self.hvWeights != 0).astype(int)
+        self.nonzeroHH = (self.hhWeights != 0).astype(int)
         self.QBMinitialised = True
 
     def buildHamiltonian(self,state,action):
@@ -297,7 +315,7 @@ class QBMAgent:
 
     def getStateI(self,state):
         # Return indexed state value
-        if state[-1]==1:
+        if state[-1]==1 or not self.storeQ:
             stateI=0
         else:
             stateI = round(np.inner(self.stateMult,state))
@@ -414,14 +432,15 @@ class QBMAgent:
 
             # Update weights and Q
             self.updateWeights(reward,Q1,Q2,state1,action1,h1)
-            self.updateQval(state1,actionI1,Q1)
-            self.updateQval(state2,actionI2,Q2)
+            if self.storeQ:
+                self.updateQval(state1,actionI1,Q1)
+                self.updateQval(state2,actionI2,Q2)
 
             # Logging
-            self.updateLog(iStep,state1,action1,reward,Q1,Q2)
+            self.updateLog(iStep,state1,action1,reward,Q1,Q2,done)
         return self.log
 
-    def updateLog(self,step,state,action,reward,Q1,Q2):
+    def updateLog(self,step,state,action,reward,Q1,Q2,done):
         reward = self.scaleReward(reward,'backward')
         self.gameReward += reward
         self.gameSteps  += 1
@@ -429,9 +448,10 @@ class QBMAgent:
 
         self.log["state"]  += [state]
         self.log["action"] += [action]
-        self.log["ExpectedReward"] += [self.scaleReward(self.Qvals[self.getStateI(state)].copy(),'backward',True)]
-        self.log["ExpectedReward0"] += [self.scaleReward(self.Qvals[0].copy(),'backward',True)]
-        self.log["ExpectedReward1"] += [self.scaleReward(self.Qvals[1].copy(),'backward',True)]
+        if self.storeQ:
+            self.log["ExpectedReward"] += [self.scaleReward(self.Qvals[self.getStateI(state)].copy(),'backward',True)]
+            self.log["ExpectedReward0"] += [self.scaleReward(self.Qvals[0].copy(),'backward',True)]
+            self.log["ExpectedReward1"] += [self.scaleReward(self.Qvals[1].copy(),'backward',True)]
         self.log["Reward"] += [reward]
         self.log["GameAvgReward"] += [self.gameReward/self.gameSteps]
         self.log["TotAvgReward"] += [np.sum(self.log["Reward"])/(step+1)]
@@ -441,5 +461,10 @@ class QBMAgent:
             print('')
             print('Step '+str(step+1))
             print('Total Average Reward = '+str(self.log["TotAvgReward"][-1]))
-            print('E[s0] = '+str(self.scaleReward(self.Qvals[0].copy(),'backward',True)))
+            if self.storeQ:
+                print('E[s0] = '+str(self.scaleReward(self.Qvals[0].copy(),'backward',True)))
+        
+        if done:
+            self.log["GameLength"] += [self.gameSteps]
+            self.log["GameReward"] += [self.gameReward]
         return

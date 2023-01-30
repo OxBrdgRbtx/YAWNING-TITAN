@@ -12,6 +12,9 @@ class QBMResults:
         if not os.path.isdir(self.ResultsDir):
             os.makedirs(self.ResultsDir)
 
+    def saveWeights(self):
+        np.savetxt(os.path.join(self.ResultsDir,'hvWeights.txt'),self.agent.hvWeights,delimiter=',')
+        np.savetxt(os.path.join(self.ResultsDir,'hhWeights.txt'),self.agent.hhWeights,delimiter=',')
 
     def toExcel(self):
         
