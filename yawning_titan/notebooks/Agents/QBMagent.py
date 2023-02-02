@@ -75,7 +75,8 @@ class QBMAgent:
         self.QBMinitialised = False # Flag to check nodes are set up
         self.SimulateAnneal = True # Simulate or use D-Wave
         self.adaptiveGradient = True # Flag to use adaptive gradient method
-        self.AnnealToBestAction = True # Flag to choose best action via annealing rather than reviewing Q values
+        self.AnnealToBestAction = False # Flag to choose best action via annealing rather than reviewing Q values
+        self.explicitRBM = True # Solve RBM equations explicitly, without sampling
 
         # Augment sample options
         # For each sampled state, produce {AugmentScale} copies of the state, where each node is switched
@@ -157,6 +158,7 @@ class QBMAgent:
         quadTerms[:self.nHidden,:self.nHidden] = -self.hhWeights
         if not freeAction:
             Hamiltonian.add_linear_from_array(-np.matmul(np.transpose(self.hvWeights),observation))
+            Hamiltonian.add_quadratic_from_dense(quadTerms)
         else:
             linearTerms = np.zeros((nFreeNodes,))
             linearTerms[:self.nHidden] = -np.matmul(np.transpose(self.hvWeights[:self.nObservations,:]),observation)
@@ -226,13 +228,31 @@ class QBMAgent:
         minusF = - HamAvg - 1/beta * entropy
         return minusF, h
 
+
+    def calculateFreeEnergyRBM(self,beta,Hamiltonian):
+        linTerms = np.diag(Hamiltonian.to_numpy_matrix())
+        pEnergy = (np.exp(linTerms)+1)**-1
+        h = np.diag(pEnergy)
+
+        pEnergy_ = pEnergy[np.logical_and(pEnergy!=0,pEnergy!=1)]
+        entropy = np.matmul(pEnergy_,np.log(pEnergy_)) + np.matmul(1-pEnergy_,np.log(1-pEnergy_))
+        
+        minusF = -np.matmul(pEnergy,linTerms) - 1/beta * entropy
+
+        return minusF, h
+
     def evaluateQBM(self,state,action,SimulateAnneal=True):
         # This function receives the current state and action choice
         # It then calculates the value of -F, and the average h values for use in weight updates
-        # TODO: Add option to explicitly evaluate RBM without sampling
 
         # Build Hamiltonian
         Hamiltonian = self.buildHamiltonian(state,action)
+
+        # If all hamiltonian terms are linear, then we are solving a clamped RBM, which has an explicit solution
+        # Solve explicitly if desired
+        if Hamiltonian.is_linear and self.explicitRBM:
+            minusF, h = self.calculateFreeEnergyRBM(self.beta,Hamiltonian)
+            return minusF, h
 
         # Sample Hamiltonian and aggregate results
         if SimulateAnneal:
