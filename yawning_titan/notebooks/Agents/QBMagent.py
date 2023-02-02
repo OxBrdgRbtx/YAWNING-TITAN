@@ -133,6 +133,11 @@ class QBMAgent:
         self.nonzeroHH = (self.hhWeights != 0).astype(int)
         self.QBMinitialised = True
 
+    def saveWeights(self):
+        np.savetxt(os.path.join(self.ResultsDir,'hvWeights.txt'),self.agent.hvWeights,delimiter=',')
+        np.savetxt(os.path.join(self.ResultsDir,'hhWeights.txt'),self.agent.hhWeights,delimiter=',')
+
+
     def buildHamiltonian(self,state,action):
         if action == []:
             # No action recieved, include in Hamiltonian
