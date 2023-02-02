@@ -40,9 +40,10 @@ class QBMAgent:
         self.nVisible = self.nActions + self.nObservations
 
         # Learning hyperparameters
-        self.beta = 5 # Thermodynamic beta in free energy calculations (also used in simulated annealing)
-        self.epsilon = 1e-1 # Update step length
-        self.epsilon0 = 1e-3 # For use with adaptive gradient - minimum epsilon
+        self.beta = 1 # Thermodynamic beta in free energy calculations (also used in simulated annealing)
+        self.epsilon = 1e-2 # Update step length
+        self.epsilon0 = 1e-10 # For use with adaptive gradient - minimum epsilon
+        self.adaptiveBurninSteps = 1e4 # For use with adaptive gradient - minimum epsilon
         self.gamma = 0.9 # Weight on future reward
 
         # Random action choice parameters
@@ -52,7 +53,8 @@ class QBMAgent:
         self.minPrandom = 0.01 # Minimum p(take random step) value
         
         # Logging
-        self.LogRate = 200
+        self.LogRate = 10000
+        self.nGameAverage = 10
         self.log = {"state": [],
             "action": [],
             "Reward": [],
@@ -66,7 +68,7 @@ class QBMAgent:
             "GameReward":[]}
 
         # Internal counters
-        self.steps = 0
+        self.step = 0
         self.outerGradSum = []
 
         # Set flags
@@ -151,30 +153,23 @@ class QBMAgent:
             observation = np.concatenate((state,action))
         Hamiltonian = dimod.BinaryQuadraticModel(nFreeNodes, 'BINARY')
         # Build Hamiltonian
-        for iH in range(self.nHidden):
-        # Loop over nodes
-            for iV in range(self.nVisible):
-                if iV<self.nObservations or not freeAction:
-                    # Interactions with observations
-                    Hamiltonian.linear[iH] -= self.hvWeights[iV,iH] * observation[iV]
-                else:
-                    Hamiltonian.add_quadratic(iH,self.nHidden+iV-self.nObservations,-self.hvWeights[iV,iH])
-            for iH2 in range(iH+1,self.nHidden):
-            # Interactions with other hidden nodes
-                if self.nonzeroHH[iH,iH2] == 1:
-                    Hamiltonian.add_quadratic(iH,iH2,-self.hhWeights[iH,iH2])
-        if freeAction:
-            # Solver not working for CQM
-            # Hamiltonian = dimod.ConstrainedQuadraticModel.from_bqm(Hamiltonian)
-            # Hamiltonian.add_constraint_from_iterable([(iV,1) for iV in range(self.nHidden,nFreeNodes)],'==',rhs=1)
-
+        quadTerms = np.zeros((nFreeNodes,nFreeNodes))
+        quadTerms[:self.nHidden,:self.nHidden] = -self.hhWeights
+        if not freeAction:
+            Hamiltonian.add_linear_from_array(-np.matmul(np.transpose(self.hvWeights),observation))
+        else:
+            linearTerms = np.zeros((nFreeNodes,))
+            linearTerms[:self.nHidden] = -np.matmul(np.transpose(self.hvWeights[:self.nObservations,:]),observation)
+            quadTerms[self.nHidden:,:self.nHidden] = -self.hvWeights[self.nObservations:,:]
+            
             # Add penalty term to ensure one node is activated
-            penaltyScale = 10
-            indOffset = self.nHidden-self.nObservations
-            for iV in range(self.nObservations,self.nVisible):
-                Hamiltonian.linear[iV+indOffset] -= penaltyScale
-                for iV2 in range(iV+1,self.nVisible):
-                    Hamiltonian.add_quadratic(iV+indOffset,iV2+indOffset,2 * penaltyScale)
+            penaltyScale = 20
+            linearTerms[self.nHidden:] = -penaltyScale
+            quadTerms[self.nHidden:,self.nHidden:] = np.triu(2 * penaltyScale * np.ones((self.nActions,self.nActions)),1)
+
+            Hamiltonian.add_linear_from_array(linearTerms)
+            Hamiltonian.add_quadratic_from_dense(quadTerms)
+
         return Hamiltonian
 
     def calculateFreeEnergy(self,results,beta,Hamiltonian):
@@ -334,47 +329,37 @@ class QBMAgent:
             self.outerGradSum = [np.zeros_like(self.hvWeights), np.zeros_like(self.hhWeights)]
 
 
-        for iH in range(self.nHidden):
-            # Loop over hidden nodes
-            for iV in range(self.nVisible):
-                # Loop over visible nodes
-                if self.nonzeroHV[iV,iH]==1:
-                    # If connected, calculate gradient and update weight
-                    gradient = (reward + self.gamma*Q2 - Q1)*observation[iV]*h[iH,iH] # Technically -gradient
-                    if self.adaptiveGradient:
-                        # If applying adaptive gradients, calculate scale
-                        if gradient==0:
-                            gradScale=1 # Avoid divide by zero error
-                        else:
-                            self.outerGradSum[0][iV,iH] += gradient**2
-                            gradScale = 1/np.sqrt(self.outerGradSum[0][iV,iH]) + (self.epsilon0/self.epsilon)
-                    else:
-                        gradScale = 1
-                    self.hvWeights[iV,iH] += self.epsilon * gradient * gradScale
-                    
-            for iH2 in range(iH+1,self.nHidden):
-                # Loop over other hidden nodes
-                if self.nonzeroHH[iH,iH2]==1:
-                    # If connected, calculate gradient and update weight
-                    gradient = (reward + self.gamma*Q2 - Q1)*h[iH,iH2] # Technically -gradient
-                    if self.adaptiveGradient:
-                        # If applying adaptive gradients, calculate scale
-                        if gradient==0:
-                            gradScale=1
-                        else:
-                            self.outerGradSum[1][iH,iH2] += gradient**2
-                            gradScale = 1/np.sqrt(self.outerGradSum[1][iH,iH2]) + (self.epsilon0/self.epsilon)
-                    else:
-                        gradScale = 1
-                    self.hhWeights[iH,iH2] += self.epsilon * gradient * gradScale
-                    
+        hvGradient = (reward + self.gamma*Q2 - Q1)*np.outer(observation,np.diag(h)) # Technically -gradient
+        hvGradient = hvGradient * self.nonzeroHV
+        if self.adaptiveGradient and self.step>self.adaptiveBurninSteps:
+            # If applying adaptive gradients, calculate scale
+            self.outerGradSum[0] += hvGradient**2
+            outerGradSum_ = self.outerGradSum[0] 
+            outerGradSum_[outerGradSum_==0] = 1
+            gradScale = 1/np.sqrt(outerGradSum_) + (self.epsilon0/self.epsilon)
+        else:
+            gradScale = 1
+        self.hvWeights += self.epsilon * hvGradient * gradScale
+
+        hhGradient = (reward + self.gamma*Q2 - Q1)*h # Technically -gradient
+        hhGradient = hhGradient * self.nonzeroHH
+        if self.adaptiveGradient and self.step>self.adaptiveBurninSteps:
+            # If applying adaptive gradients, calculate scale
+            self.outerGradSum[1] += hhGradient**2
+            outerGradSum_ = self.outerGradSum[1] 
+            outerGradSum_[outerGradSum_==0] = 1
+            gradScale = 1/np.sqrt(outerGradSum_) + (self.epsilon0/self.epsilon)
+        else:
+            gradScale = 1
+        self.hhWeights += self.epsilon * hhGradient * gradScale
+
     def scaleReward(self,reward,direction='forward',Q=False):
         # Scale/unscale reward values
         if Q:
-            scale = 10 * (1-self.gamma)
+            scale = 100 * (1-self.gamma)
         else:
-            scale = 10
-        offset = 20
+            scale = 100
+        offset = 100
         if direction=='forward':
             # Reward -> scaled reward
             reward = reward + offset
@@ -411,7 +396,8 @@ class QBMAgent:
             self.initRBM(5) # 5 Node RBM by default
         
         done = True
-        for iStep in range(nSteps):
+        while self.step < nSteps:
+            self.step += 1
             # Get observation
             if done:
                 state1 = self.env.reset()
@@ -422,7 +408,7 @@ class QBMAgent:
                 state1 = state2
 
             # Update probability of taking a random step
-            if iStep > self.nRandomSteps:
+            if self.step > self.nRandomSteps:
                 self.pRandom = self.pRandom * self.pRandomDecay
             # Choose an action
             Q1, action1, actionI1, h1 = self.ChooseAction(state1,randomAction = True)
@@ -442,10 +428,10 @@ class QBMAgent:
                 self.updateQval(state2,actionI2,Q2)
 
             # Logging
-            self.updateLog(iStep,state1,action1,reward,Q1,Q2,done)
+            self.updateLog(state1,action1,reward,Q1,Q2,done)
         return self.log
 
-    def updateLog(self,step,state,action,reward,Q1,Q2,done):
+    def updateLog(self,state,action,reward,Q1,Q2,done):
         reward = self.scaleReward(reward,'backward')
         self.gameReward += reward
         self.gameSteps  += 1
@@ -458,18 +444,28 @@ class QBMAgent:
             self.log["ExpectedReward0"] += [self.scaleReward(self.Qvals[0].copy(),'backward',True)]
             self.log["ExpectedReward1"] += [self.scaleReward(self.Qvals[1].copy(),'backward',True)]
         self.log["Reward"] += [reward]
-        self.log["GameAvgReward"] += [self.gameReward/self.gameSteps]
-        self.log["TotAvgReward"] += [np.sum(self.log["Reward"])/(step+1)]
+        self.log["TotAvgReward"] += [np.sum(self.log["Reward"])/(self.step)]
         self.log["Qerror"] += [reward - self.scaleReward(-self.gamma*Q2 + Q1,'backward')]
 
-        if self.LogRate>0 and np.mod(step+1,self.LogRate)==0:
+        if self.LogRate>0 and np.mod(self.step,self.LogRate)==0:
             print('')
-            print('Step '+str(step+1))
+            print('Step '+str(self.step))
             print('Total Average Reward = '+str(self.log["TotAvgReward"][-1]))
+            if len(self.log["GameLength"])>0:
+                if len(self.log["GameLength"])<self.nGameAverage:
+                    nGames = len(self.log["GameLength"])
+                else:
+                    nGames = self.nGameAverage
+                meanLength = np.mean(self.log["GameLength"][-nGames:])
+                meanReward = np.mean(self.log["GameAvgReward"][-nGames:])
+                print(f'Last {nGames} games average length: {meanLength}')
+                print(f'Last {nGames} games average reward: {meanReward}/step')
             if self.storeQ:
                 print('E[s0] = '+str(self.scaleReward(self.Qvals[0].copy(),'backward',True)))
+                print('E[s1] = '+str(self.scaleReward(self.Qvals[1].copy(),'backward',True)))
         
         if done:
             self.log["GameLength"] += [self.gameSteps]
             self.log["GameReward"] += [self.gameReward]
+            self.log["GameAvgReward"] += [self.gameReward/self.gameSteps]
         return
