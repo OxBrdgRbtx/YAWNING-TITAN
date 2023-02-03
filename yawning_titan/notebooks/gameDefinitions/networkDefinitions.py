@@ -50,6 +50,22 @@ def getFiveNodeNetwork():
         high_value_nodes=highValueNodes)
     return network_config
 
+def get10NodeNetwork():
+    matrix, nodePositions = network_creator.create_18_node_network() 
+
+    keep = [1, 3, 5, 7, 8, 9, 11, 12, 14, 16]
+    matrix = matrix[keep,:]
+    matrix = matrix[:,keep]
+    nodePositions = {str(iN):nodePositions[str(iK)] for iN, iK in enumerate(keep)}
+
+    entryNodes = ['2', '3', '7']
+    highValueNodes = ['5']
+
+    network_config = NetworkConfig.create_from_args(matrix=matrix,
+        positions=nodePositions,
+        entry_nodes=entryNodes,
+        high_value_nodes=highValueNodes)
+    return network_config   
 
 def get18NodeNetwork():
     matrix, nodePositions = network_creator.create_18_node_network() 
