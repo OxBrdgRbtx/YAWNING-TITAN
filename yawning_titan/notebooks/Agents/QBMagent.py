@@ -1,6 +1,6 @@
 import numpy as np
 from yawning_titan.envs.generic.generic_env import GenericNetworkEnv
-from yawning_titan import _YT_ROOT_DIR
+from yawning_titan.notebooks.Outputs.qbmLogger import qbmLogger
 
 # import DWAVE model and sampler
 import dimod
@@ -29,7 +29,6 @@ class QBMAgent:
 #   AmendZeroState      - Amend a state of all zeros to a state of all zeros, with a 1 final node flag
 #   ChooseAction        - Choose an action and evaluate the Q value from the BM
 #   learn               - Run the training loop
-#   updateLog           - Log the current training step
 
     def __init__(self,env: GenericNetworkEnv,saveName="QBM"):
         self.env = env
@@ -54,19 +53,13 @@ class QBMAgent:
         self.minPrandom = 0.01 # Minimum p(take random step) value
         
         # Logging
-        self.LogRate = 10000
-        self.nGameAverage = 10
-        self.log = {"state": [],
-            "action": [],
-            "Reward": [],
-            "ExpectedReward": [],
-            "ExpectedReward0": [],
-            "ExpectedReward1": [],
-            "GameAvgReward":[],
-            "TotAvgReward":[],
-            "Qerror": [],
-            "GameLength":[],
-            "GameReward":[]}
+        self.log = qbmLogger(saveName=saveName,
+            printRate=int(1e4),
+            gameWindow=50,
+            writeStepLogs=True, # Write summary step logs to .txt files periodically during training
+            writeGameLogs=True, # Write summary game logs to .txt files after each game
+            writeWeights=False, # Save weights to .txt files periodically during training
+            writeToTerminal=True) # Print results to terminal periodically
 
         # Internal counters
         self.step = 0
@@ -78,9 +71,6 @@ class QBMAgent:
         self.adaptiveGradient = True # Flag to use adaptive gradient method
         self.AnnealToBestAction = False # Flag to choose best action via annealing rather than reviewing Q values
         self.explicitRBM = True # Solve RBM equations explicitly, without sampling
-        self.writeStepLogstoTxt = True # Write summary step logs to .txt files periodically during training
-        self.writeGameLogstoTxt = True # Write summary game logs to .txt files after each game
-        self.writeWeightstoTxt = False # save weights to .txt files periodically during training
 
         # Augment sample options
         # For each sampled state, produce {AugmentScale} copies of the state, where each node is switched
@@ -143,7 +133,6 @@ class QBMAgent:
     def saveWeights(self,resultsDir):
         np.savetxt(os.path.join(resultsDir,'hvWeights.txt'),self.hvWeights,delimiter=',')
         np.savetxt(os.path.join(resultsDir,'hhWeights.txt'),self.hhWeights,delimiter=',')
-
 
     def buildHamiltonian(self,state,action):
         if action == []:
@@ -231,7 +220,6 @@ class QBMAgent:
 
         minusF = - HamAvg - 1/beta * entropy
         return minusF, h
-
 
     def calculateFreeEnergyRBM(self,beta,Hamiltonian):
         linTerms = np.diag(Hamiltonian.to_numpy_matrix())
@@ -439,93 +427,21 @@ class QBMAgent:
 
             # Do action, returns reward and new state
             state2, reward, done, notes = self.env.step(actionI1)
-            reward = self.scaleReward(reward)
+            scaledReward = self.scaleReward(reward)
             state2 = self.AmendZeroState(state2)
 
             # Choose an action2, calculate Q2
             Q2, action2, actionI2, _ = self.ChooseAction(state1,randomAction = False)
 
             # Update weights and Q
-            self.updateWeights(reward,Q1,Q2,state1,action1,h1)
+            self.updateWeights(scaledReward,Q1,Q2,state1,action1,h1)
             if self.storeQ:
                 self.updateQval(state1,actionI1,Q1)
                 self.updateQval(state2,actionI2,Q2)
 
             # Logging
-            self.updateLog(state1,action1,reward,Q1,Q2,done)
+            self.gameReward += reward
+            self.gameSteps  += 1
+            self.log.update(self,state1,action1,reward,Q1,Q2,done)
+
         return self.log
-
-    def updateLog(self,state,action,reward,Q1,Q2,done):
-        reward = self.scaleReward(reward,'backward')
-        self.gameReward += reward
-        self.gameSteps  += 1
-
-
-        self.log["state"]  += [state]
-        self.log["action"] += [action]
-        if self.storeQ:
-            self.log["ExpectedReward"] += [self.scaleReward(self.Qvals[self.getStateI(state)].copy(),'backward',True)]
-            self.log["ExpectedReward0"] += [self.scaleReward(self.Qvals[0].copy(),'backward',True)]
-            self.log["ExpectedReward1"] += [self.scaleReward(self.Qvals[1].copy(),'backward',True)]
-        self.log["Reward"] += [reward]
-        self.log["TotAvgReward"] += [np.sum(self.log["Reward"])/(self.step)]
-        self.log["Qerror"] += [reward - self.scaleReward(-self.gamma*Q2 + Q1,'backward')]
-
-        resultsDir = os.path.join(_YT_ROOT_DIR,'results',self.name)
-        if not os.path.isdir(resultsDir) and (self.writeStepLogstoTxt or self.writeGameLogstoTxt or self.writeWeightstoTxt):
-            os.makedirs(resultsDir)
-
-        if done:
-            self.log["GameLength"] += [self.gameSteps]
-            self.log["GameReward"] += [self.gameReward]
-            self.log["GameAvgReward"] += [self.gameReward/self.gameSteps]
-
-            if self.writeGameLogstoTxt:
-                logFile = os.path.join(resultsDir,'GameInfo.csv')
-                nGames = len(self.log["GameLength"])
-                try:
-                    if nGames==1:
-                        with open(logFile,'wb') as f:
-                            f.write(b"Game Number, Length, Reward, Average Reward\n")
-                    with open(logFile,"ab") as f:
-                        np.savetxt(f,np.array([nGames, self.gameSteps, self.gameReward, self.gameReward/self.gameSteps]).reshape((1,-1)),delimiter=',')
-                except:
-                    print(f'Failed writing step log to GameInfo.csv')
-
-        if self.LogRate>0 and np.mod(self.step,self.LogRate)==0:
-            print('')
-            print('Step '+str(self.step))
-            print('Total Average Reward = '+str(self.log["TotAvgReward"][-1]))
-            if len(self.log["GameLength"])>0:
-                if len(self.log["GameLength"])<self.nGameAverage:
-                    nGames = len(self.log["GameLength"])
-                else:
-                    nGames = self.nGameAverage
-                meanLength = np.mean(self.log["GameLength"][-nGames:])
-                meanReward = np.mean(self.log["GameAvgReward"][-nGames:])
-                print(f'Last {nGames} games average length: {meanLength}')
-                print(f'Last {nGames} games average reward: {meanReward}/step')
-            if self.storeQ:
-                print('E[s0] = '+str(self.scaleReward(self.Qvals[0].copy(),'backward',True)))
-                print('E[s1] = '+str(self.scaleReward(self.Qvals[1].copy(),'backward',True)))
-            
-            
-            # Save to txt files
-            if self.writeStepLogstoTxt:
-                logFile = os.path.join(resultsDir,'StepInfo.csv')
-                try:
-                    if self.step==self.LogRate:
-                        with open(logFile,'wb') as f:
-                            f.write(b"Step, Total Mean Reward, Previous 10 games mean length, Previous 10 games mean reward\n")
-                    with open(logFile,"ab") as f:
-                        np.savetxt(f,np.array([self.step, self.log["TotAvgReward"][-1], meanLength, meanReward]).reshape((1,-1)),delimiter=',')
-                except:
-                    print(f'Failed writing step log to StepInfo.csv')
-
-            if self.writeWeightstoTxt:
-                try:
-                    self.saveWeights(os.path.join(resultsDir,f'Step_{self.step}'))
-                except:
-                    print(f'Failed saving weights')
-
-        return
