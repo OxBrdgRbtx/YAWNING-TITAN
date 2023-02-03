@@ -21,19 +21,40 @@ from yawning_titan.notebooks.Outputs.QBMResults import QBMResults
 # Define network
 #matrix, node_positions = network_creator.create_18_node_network() 
 # Simple Network of two nodes:
+# matrix = np.asarray(
+#         [
+#             [0, 1],
+#             [1, 0],
+#         ]
+#     )
+# nodePositions = {
+#         "0": [1, 0],
+#         "1": [2, 0],
+#     }
+# entryNodes = ['0']
+# highValueNodes = ['1']
+    
+# network_config = NetworkConfig.create_from_args(matrix=matrix, positions=nodePositions,entry_nodes=entryNodes,high_value_nodes=highValueNodes)
+
+# Simple network of 5 nodes
 matrix = np.asarray(
         [
-            [0, 1],
-            [1, 0],
+            [0, 1, 1, 0, 0],
+            [1, 0, 0, 1, 0],
+            [1, 0, 0, 1, 0],
+            [0, 1, 1, 0, 1],
+            [0, 0, 0, 1, 0]
         ]
     )
 nodePositions = {
         "0": [1, 0],
-        "1": [2, 0],
+        "1": [2, 1],
+        "2": [2,-1],
+        "3": [3, 0],
+        "4": [4, 0],
     }
 entryNodes = ['0']
-highValueNodes = ['1']
-    
+highValueNodes = ['4']
 network_config = NetworkConfig.create_from_args(matrix=matrix, positions=nodePositions,entry_nodes=entryNodes,high_value_nodes=highValueNodes)
 
 # Define game rules
@@ -62,10 +83,10 @@ _ = env.reset()
 
 #  Build and RBM agent and learn
 agent = QBMAgent(env,'RBMtest')
-agent.initDBM([3]) # 3 hidden nodes
-agent.learn(nSteps=1e5)
+agent.initRBM(8) # 3 hidden nodes
+agent.learn(nSteps=1e6)
 
 # Output results
 results = QBMResults(agent)
-results.toExcel()
+# results.toExcel()
 results.plotAll(showFigs=False,saveFigs=True)
