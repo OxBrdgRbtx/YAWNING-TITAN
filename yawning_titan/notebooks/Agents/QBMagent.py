@@ -408,8 +408,9 @@ class QBMAgent:
             self.initRBM(5) # 5 Node RBM by default
         
         done = True
-        while self.step < nSteps:
-            self.step += 1
+        nSteps = int(nSteps)
+        self.log.initNsteps(self,nSteps)
+        for self.step in range(1,(nSteps+1)):
             # Get observation
             if done:
                 state1 = self.env.reset()
@@ -444,4 +445,5 @@ class QBMAgent:
             self.gameSteps  += 1
             self.log.update(self,state1,action1,reward,Q1,Q2,done)
 
+        self.log.tidy()
         return self.log

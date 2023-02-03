@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import time
 from yawning_titan import _YT_ROOT_DIR
 
 
@@ -39,7 +40,29 @@ class qbmLogger:
             "Qerror": [],
             "Q0":[]}
 
+        # Set up profiling
+        if writeToTerminal:
+            self.tStart = time.time()
+            self.t0 = time.time()
+
+    def initNsteps(self,agent,nSteps):
+        # Initialise arrays for each log for speed
+        for key in self.gameLog.keys():
+            self.gameLog[key] = np.empty((nSteps,))
+        for key in self.stepLog.keys():
+            self.stepLog[key] = np.empty((nSteps,))
+        self.stepLog["state"] = np.empty((nSteps,agent.nObservations))
+        self.stepLog["action"] = np.empty((nSteps,agent.nActions))
+        self.stepLog["Expected Reward"] = np.empty((nSteps,agent.nActions))
+        self.stepLog["Q0"] = np.empty((nSteps,agent.nActions))
+
+    def tidy(self):
+        for key in self.gameLog.keys():
+            self.gameLog[key] = self.gameLog[key][:self.nGames]
+
+
     def update(self,agent,state,action,reward,Q1,Q2,done):
+        self.step = agent.step-1
         self.updateStepLog(agent,state,action,reward,Q1,Q2)
         if done:
             self.updateGameLog(agent)
@@ -55,25 +78,26 @@ class qbmLogger:
                 self.printToTerminal(agent)
 
     def updateStepLog(self,agent,state,action,reward,Q1,Q2):
-        self.stepLog["state"]  += [state]
-        self.stepLog["action"] += [action]
+        self.stepLog["state"][self.step,:] = state
+        self.stepLog["action"][self.step,:] = action
 
         if agent.storeQ:
-            self.stepLog["Expected Reward"] += [agent.scaleReward(agent.Qvals[agent.getStateI(state)].copy(),'backward',True)]
-            self.stepLog["Q0"] += [agent.scaleReward(agent.Qvals[0].copy(),'backward',True)]
-        self.stepLog["Reward"] += [reward]
-        self.stepLog["Average Reward"] += [np.sum(self.stepLog["Reward"])/(agent.step)]
-        self.stepLog["Qerror"] += [reward - agent.scaleReward(-agent.gamma*Q2 + Q1,'backward')]
+            self.stepLog["Expected Reward"][self.step,:] = agent.scaleReward(agent.Qvals[agent.getStateI(state)].copy(),'backward',True)
+            self.stepLog["Q0"][self.step,:] = agent.scaleReward(agent.Qvals[0].copy(),'backward',True)
+        self.stepLog["Reward"][self.step] = reward
+        self.stepLog["Average Reward"][self.step] = np.sum(self.stepLog["Reward"])/(agent.step)
+        self.stepLog["Qerror"][self.step] = reward - agent.scaleReward(-agent.gamma*Q2 + Q1,'backward')
 
     def updateGameLog(self,agent):
+        nGames = self.nGames
         self.nGames += 1
-        self.gameLog["Length"] += [agent.gameSteps]
-        self.gameLog["Reward"] += [agent.gameReward]
-        self.gameLog["Average Reward"] += [agent.gameReward/agent.gameSteps]
+        self.gameLog["Length"][nGames] = agent.gameSteps
+        self.gameLog["Reward"][nGames] = agent.gameReward
+        self.gameLog["Average Reward"][nGames] = agent.gameReward/agent.gameSteps
 
         self.getRollingAverageGame()
-        self.gameLog["Rolling Average Length"] += [self.rollingAverageLength]
-        self.gameLog["Rolling Average Reward"] += [self.rollingAverageReward]
+        self.gameLog["Rolling Average Length"][nGames] = self.rollingAverageLength
+        self.gameLog["Rolling Average Reward"][nGames] = self.rollingAverageReward
     
     def stepLogtoTxt(self,agent):
         logFile = os.path.join(self.resultsDir,'StepInfo.csv')
@@ -95,7 +119,9 @@ class qbmLogger:
                     f.write(f"Game Number, Length, Reward, Average Reward, Rolling Average Length ({self.gameWindow} games), Rolling Average Reward ({self.gameWindow} games)\n")
                 self.newGameLog = False
             with open(logFile,"ab") as f:
-                np.savetxt(f,np.array([self.nGames, agent.gameSteps, agent.gameReward, agent.gameReward/agent.gameSteps]).reshape((1,-1)),delimiter=',')
+                np.savetxt(f,np.array([self.nGames, agent.gameSteps, agent.gameReward, 
+                    agent.gameReward/agent.gameSteps, self.rollingAverageLength, 
+                    self.rollingAverageReward]).reshape((1,-1)),delimiter=',')
         except:
             print(f'Failed writing step log to GameInfo.csv')
 
@@ -106,9 +132,17 @@ class qbmLogger:
             print(f'Failed saving weights')
 
     def printToTerminal(self,agent):
+        # Do some profiling first
+        t1 = time.time()
+        totalTime = t1 - self.tStart
+        periodTime = t1 - self.t0
+        self.t0 = t1
+
         print('')
         print('Step '+str(agent.step))
-        print(f'Total Average Reward = {self.stepLog["Average Reward"][-1]}')
+        print(f'{totalTime:.1f} seconds elapsed ({periodTime:.1f}s since previous update)')
+        print(f'{1000*totalTime/agent.step:.1f}ms/step ({1000*periodTime/self.printRate:.1f}ms/step since previous update)')
+        print(f'Total Average Reward = {self.stepLog["Average Reward"][self.step]}')
         if self.nGames>0:
             window = self.thisGameWindow
             aLength = [self.rollingAverageLength]+self.rollingAverageLength_lims
@@ -116,7 +150,7 @@ class qbmLogger:
             print(f'Last {window} games average length ([min, max]): {aLength[0]:.3f} ([{aLength[1]}, {aLength[2]}])')
             print(f'Last {window} games average reward/step ([min, max]): {aReward[0]:.3f}  ([{aReward[1]:.3f}, {aReward[2]:.3f}])')
         if agent.storeQ:
-            print(f'Q0 = {self.stepLog["Q0"][-1]}')
+            print(f'Q0 = {self.stepLog["Q0"][self.step]}')
 
     def getRollingAverageGame(self):
         if self.nGames>0:
@@ -124,9 +158,11 @@ class qbmLogger:
                 self.thisGameWindow = self.nGames
             else:
                 self.thisGameWindow = self.gameWindow
-            lengths = self.gameLog["Length"][-self.thisGameWindow:]
-            rewards = self.gameLog["Reward"][-self.thisGameWindow:]
-            avgRewards = self.gameLog["Average Reward"][-self.thisGameWindow:]
+            minStep = self.step-self.thisGameWindow
+            thisStep = self.step+1
+            lengths = self.gameLog["Length"][minStep:thisStep]
+            rewards = self.gameLog["Reward"][minStep:thisStep]
+            avgRewards = self.gameLog["Average Reward"][minStep:thisStep]
             self.rollingAverageLength = np.mean(lengths)
             self.rollingAverageLength_lims = [np.min(lengths),np.max(lengths)]
             self.rollingAverageReward = np.sum(rewards)/(self.rollingAverageLength*self.thisGameWindow)
