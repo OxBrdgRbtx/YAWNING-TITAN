@@ -159,7 +159,7 @@ class qbmLogger:
             else:
                 self.thisGameWindow = self.gameWindow
             minStep = self.nGames-self.thisGameWindow
-            thisStep = self.nGames+1
+            thisStep = self.nGames
             lengths = self.gameLog["Length"][minStep:thisStep]
             rewards = self.gameLog["Reward"][minStep:thisStep]
             avgRewards = self.gameLog["Average Reward"][minStep:thisStep]
