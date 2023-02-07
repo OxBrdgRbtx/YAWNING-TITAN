@@ -402,13 +402,13 @@ class RedActionSet:
                     attacking_node_map[node] = compromised_node
 
         if (
-            self.network_interface.game_mode.red.chance_to_spread_to_unconnected_node
+            self.network_interface.game_mode.red.chance_to_spread_to_connected_node
             > 0
         ):
             for node in set_of_spreading_nodes:
                 if (
                     random.randint(0, 100)
-                    < self.network_interface.game_mode.red.chance_to_spread_to_unconnected_node
+                    < self.network_interface.game_mode.red.chance_to_spread_to_connected_node
                     * 100
                 ):
                     # try to naturally spread to the node based on a percentage change listed in the config file
@@ -430,7 +430,7 @@ class RedActionSet:
                     attacking_nodes.append(attacking_node_map[node])
                     targets.append(node)
 
-        if self.network_interface.game_mode.red.chance_to_spread_to_connected_node:
+        if self.network_interface.game_mode.red.chance_to_spread_to_unconnected_node:
             # Calculate the list of nodes that are not connected to a compromised node
             nodes_not_connected_to_red = (
                 set(self.network_interface.get_nodes())
@@ -442,7 +442,7 @@ class RedActionSet:
             for node in nodes_not_connected_to_red:
                 if (
                     random.randint(0, 100)
-                    < self.network_interface.game_mode.red.chance_to_spread_to_connected_node
+                    < self.network_interface.game_mode.red.chance_to_spread_to_unconnected_node
                     * 100
                 ):
                     # Try to naturally randomly infect nodes based on a percentage chance in the config file
