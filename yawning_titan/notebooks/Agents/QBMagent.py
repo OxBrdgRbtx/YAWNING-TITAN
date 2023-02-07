@@ -1,6 +1,7 @@
 import numpy as np
 from yawning_titan.envs.generic.generic_env import GenericNetworkEnv
 from yawning_titan.notebooks.Outputs.qbmLogger import qbmLogger
+from yawning_titan.notebooks.Outputs.QBMResults import QBMResults
 
 # import DWAVE model and sampler
 import dimod
@@ -30,7 +31,15 @@ class QBMAgent:
 #   ChooseAction        - Choose an action and evaluate the Q value from the BM
 #   learn               - Run the training loop
 
-    def __init__(self,env: GenericNetworkEnv,saveName="QBM"):
+    def __init__(self,env: GenericNetworkEnv,saveName="QBM",
+        beta:float=2,epsilon:float=1e-2,epsilon0:float=1e-10,adaptiveBurninSteps:int=10000,gamma:float=0.9, # Learning hyperparameters
+        nRandomSteps:int=1000,pRandomDecay:float=0.99,minPrandom:float=0.01, # Random action choice parameters
+        printRate:int=10000,gameWindow:int=50,stepWindow:int=1000, # Logging options
+        writeStepLogs:bool=True,writeGameLogs:bool=True,writeWeights:bool=False,writeToTerminal:bool=True, # Logging flags
+        SimulateAnneal:bool=True,AnnealToBestAction:bool=False,adaptiveGradient:bool=True,explicitRBM:bool=True, # Annealing flags
+        AugmentSamples:bool=True,AugmentScale:int=50,augmentPswitch:float=0.2): # Sample Augmentation options
+
+
         self.env = env
         self.name = saveName
 
@@ -40,26 +49,27 @@ class QBMAgent:
         self.nVisible = self.nActions + self.nObservations
 
         # Learning hyperparameters
-        self.beta = 1 # Thermodynamic beta in free energy calculations (also used in simulated annealing)
-        self.epsilon = 1e-2 # Update step length
-        self.epsilon0 = 1e-10 # For use with adaptive gradient - minimum epsilon
-        self.adaptiveBurninSteps = 1e4 # For use with adaptive gradient - minimum epsilon
-        self.gamma = 0.9 # Weight on future reward
+        self.beta = beta # Thermodynamic beta in free energy calculations (also used in simulated annealing)
+        self.epsilon = epsilon # Update step length
+        self.epsilon0 = epsilon0 # For use with adaptive gradient - minimum epsilon
+        self.adaptiveBurninSteps = adaptiveBurninSteps # For use with adaptive gradient - minimum epsilon
+        self.gamma = gamma # Weight on future reward
 
         # Random action choice parameters
-        self.nRandomSteps = 1000 # Number of random steps to take in initial learning
-        self.pRandomDecay = 0.99 # Stepwise decay on p(take random step) after nRandomSteps
+        self.nRandomSteps = nRandomSteps # Number of random steps to take in initial learning
+        self.pRandomDecay = pRandomDecay # Stepwise decay on p(take random step) after nRandomSteps
         self.pRandom = 1 # Initial p(take random step) value
-        self.minPrandom = 0.01 # Minimum p(take random step) value
+        self.minPrandom = minPrandom # Minimum p(take random step) value
         
         # Logging
         self.log = qbmLogger(saveName=saveName,
-            printRate=int(1e4),
-            gameWindow=50,
-            writeStepLogs=True, # Write summary step logs to .txt files periodically during training
-            writeGameLogs=True, # Write summary game logs to .txt files after each game
-            writeWeights=False, # Save weights to .txt files periodically during training
-            writeToTerminal=True) # Print results to terminal periodically
+            printRate=printRate,
+            gameWindow=gameWindow,
+            stepWindow=stepWindow,
+            writeStepLogs=writeStepLogs, # Write summary step logs to .txt files periodically during training
+            writeGameLogs=writeGameLogs, # Write summary game logs to .txt files after each game
+            writeWeights=writeWeights, # Save weights to .txt files periodically during training
+            writeToTerminal=writeToTerminal) # Print results to terminal periodically
 
         # Internal counters
         self.step = 0
@@ -67,17 +77,17 @@ class QBMAgent:
 
         # Set flags
         self.QBMinitialised = False # Flag to check nodes are set up
-        self.SimulateAnneal = True # Simulate or use D-Wave
-        self.adaptiveGradient = True # Flag to use adaptive gradient method
-        self.AnnealToBestAction = False # Flag to choose best action via annealing rather than reviewing Q values
-        self.explicitRBM = True # Solve RBM equations explicitly, without sampling
+        self.SimulateAnneal = SimulateAnneal # Simulate or use D-Wave
+        self.adaptiveGradient = adaptiveGradient # Flag to use adaptive gradient method
+        self.AnnealToBestAction = AnnealToBestAction # Flag to choose best action via annealing rather than reviewing Q values
+        self.explicitRBM = explicitRBM # Solve RBM equations explicitly, without sampling
 
         # Augment sample options
         # For each sampled state, produce {AugmentScale} copies of the state, where each node is switched
-        # with probability {pSwitch}. This helps to improve the estimated values of <H> and <h>.
-        self.AugmentSamples = True
-        self.AugmentScale = 50
-        self.pSwitch = 0.2 # Probability of each individual node switching
+        # with probability {augmentPswitch}. This helps to improve the estimated values of <H> and <h>.
+        self.AugmentSamples = AugmentSamples
+        self.AugmentScale = AugmentScale
+        self.augmentPswitch = augmentPswitch# Probability of each individual node switching
       
         # Set Stored Q maximums
         self.storeQ = self.nObservations<30
@@ -184,8 +194,8 @@ class QBMAgent:
                 sampAgg += [record[0]]
                 for iAdd in range(self.AugmentScale):
                     # Probability for getting all nodes to switch at least once is
-                    # (1-(1-pSwitch)^AugmentScale)^nHidden
-                    flipBit = np.random.rand(self.nHidden)<self.pSwitch 
+                    # (1-(1-augmentPswitch)^AugmentScale)^nHidden
+                    flipBit = np.random.rand(self.nHidden)<self.augmentPswitch 
                     thisSamp = np.mod(record[0] + flipBit,2)
                     thisEnergy = Hamiltonian.energy(thisSamp)
                     resAug += [[thisSamp,thisEnergy]]
@@ -242,7 +252,7 @@ class QBMAgent:
 
         # If all hamiltonian terms are linear, then we are solving a clamped RBM, which has an explicit solution
         # Solve explicitly if desired
-        if Hamiltonian.is_linear and self.explicitRBM:
+        if Hamiltonian.is_linear() and self.explicitRBM:
             minusF, h = self.calculateFreeEnergyRBM(self.beta,Hamiltonian)
             return minusF, h
 
@@ -447,3 +457,14 @@ class QBMAgent:
 
         self.log.tidy()
         return self.log
+
+    def exportResults(self,writeTables:bool=True,showFigs:bool=False,saveFigs:bool=True,storeMeta:bool=True):
+        # Output results
+        results = QBMResults(self)
+        if writeTables:
+            results.toExcel()
+        if showFigs or saveFigs:
+            results.plotAll(showFigs=showFigs,saveFigs=saveFigs)
+        if storeMeta:
+            results.saveMetadata()
+

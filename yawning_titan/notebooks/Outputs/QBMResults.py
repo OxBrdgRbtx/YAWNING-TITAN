@@ -1,12 +1,11 @@
 import pandas as pd
 import numpy as np
 import os
-from yawning_titan.notebooks.Agents.QBMagent import QBMAgent
 from yawning_titan import _YT_ROOT_DIR
 from matplotlib import pyplot as plt
 
 class QBMResults:
-    def __init__(self,Agent: QBMAgent):
+    def __init__(self,Agent):
         self.agent = Agent
         self.log = Agent.log
         self.resultsDir = Agent.log.resultsDir
@@ -69,4 +68,21 @@ class QBMResults:
     def isDiscrete(self,log,key):
         df = pd.DataFrame(log[key])
         return np.all(np.logical_or(df==0,df ==1))
+    
+    def saveMetadata(self):
+        # Save agent parameters
+        fields = ["nActions", "nObservations", "nHidden", "beta", "epsilon", "epsilon0", 
+            "adaptiveBurninSteps", "gamma", "nRandomSteps", "pRandomDecay", "minPrandom",
+            "SimulateAnneal", "adaptiveGradient", "AnnealToBestAction", "explicitRBM",
+            "AugmentSamples", "AugmentScale", "augmentPswitch"]
 
+        logfile = os.path.join(self.resultsDir,'Metadata.csv')
+        with open(logfile,'w') as f:
+            for field in fields:
+                f.write(f"{field},{self.agent.__getattribute__(field)}\n")
+          
+        # Save game options
+        gamefile = os.path.join(self.resultsDir,'gameMode.yml')
+        self.agent.env.network_interface.game_mode.to_yaml(gamefile)
+
+        

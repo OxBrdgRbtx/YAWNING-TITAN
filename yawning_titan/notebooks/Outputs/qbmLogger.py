@@ -5,7 +5,7 @@ from yawning_titan import _YT_ROOT_DIR
 
 
 class qbmLogger:
-    def __init__(self,saveName: str,printRate:int=int(1e4),gameWindow:int=10,
+    def __init__(self,saveName: str,printRate:int=int(1e4),gameWindow:int=10,stepWindow:int=1000,
     writeStepLogs:bool=False,writeGameLogs:bool=False,writeWeights:bool=False,writeToTerminal:bool=True):
         
         # Set up results directory
@@ -16,6 +16,7 @@ class qbmLogger:
         # Store input options
         self.printRate = printRate
         self.gameWindow = gameWindow
+        self.stepWindow = stepWindow
         self.writeStepLogs = writeStepLogs
         self.writeGameLogs = writeGameLogs
         self.writeWeights = writeWeights
@@ -37,6 +38,7 @@ class qbmLogger:
             "Reward": [],
             "Expected Reward": [],
             "Average Reward": [],
+            "Rolling Average Reward": [],
             "Qerror": [],
             "Q0":[]}
 
@@ -88,6 +90,9 @@ class qbmLogger:
         self.stepLog["Average Reward"][self.step] = np.sum(self.stepLog["Reward"])/(agent.step)
         self.stepLog["Qerror"][self.step] = reward - agent.scaleReward(-agent.gamma*Q2 + Q1,'backward')
 
+        minStep = max((0,agent.step-self.stepWindow))
+        self.stepLog["Rolling Average Reward"][self.step] = np.sum(self.stepLog["Reward"][minStep:agent.step])/(agent.step-minStep)
+
     def updateGameLog(self,agent):
         nGames = self.nGames
         self.nGames += 1
@@ -96,18 +101,18 @@ class qbmLogger:
         self.gameLog["Average Reward"][nGames] = agent.gameReward/agent.gameSteps
 
         self.getRollingAverageGame()
-        self.gameLog["Rolling Average Length"][nGames] = self.rollingAverageLength
-        self.gameLog["Rolling Average Reward"][nGames] = self.rollingAverageReward
+        self.gameLog["Rolling Average Length"][nGames] = self.rollingAverageGameLength
+        self.gameLog["Rolling Average Reward"][nGames] = self.rollingAverageGameReward
     
     def stepLogtoTxt(self,agent):
         logFile = os.path.join(self.resultsDir,'StepInfo.csv')
         try:
             if self.newStepLog:
                 with open(logFile,'w') as f:
-                    f.write(f"Step, Total Mean Reward, Previous {self.gameWindow} games mean length, Previous {self.gameWindow} games mean reward\n")
+                    f.write(f"Step, Total Mean Reward, Previous {self.stepWindow} steps average reward, Previous {self.gameWindow} games mean length, Previous {self.gameWindow} games mean reward\n")
                 self.newStepLog = False
             with open(logFile,"ab") as f:
-                np.savetxt(f,np.array([agent.step, self.stepLog["Average Reward"][-1], self.rollingAverageLength, self.rollingAverageReward]).reshape((1,-1)),delimiter=',')
+                np.savetxt(f,np.array([agent.step, self.stepLog["Average Reward"][self.step], self.stepLog["Rolling Average Reward"][self.step], self.rollingAverageGameLength, self.rollingAverageGameReward]).reshape((1,-1)),delimiter=',')
         except:
             print(f'Failed writing step log to StepInfo.csv')
     
@@ -120,8 +125,8 @@ class qbmLogger:
                 self.newGameLog = False
             with open(logFile,"ab") as f:
                 np.savetxt(f,np.array([self.nGames, agent.gameSteps, agent.gameReward, 
-                    agent.gameReward/agent.gameSteps, self.rollingAverageLength, 
-                    self.rollingAverageReward]).reshape((1,-1)),delimiter=',')
+                    agent.gameReward/agent.gameSteps, self.rollingAverageGameLength, 
+                    self.rollingAverageGameReward]).reshape((1,-1)),delimiter=',')
         except:
             print(f'Failed writing step log to GameInfo.csv')
 
@@ -145,8 +150,8 @@ class qbmLogger:
         print(f'Total Average Reward = {self.stepLog["Average Reward"][self.step]}')
         if self.nGames>0:
             window = self.thisGameWindow
-            aLength = [self.rollingAverageLength]+self.rollingAverageLength_lims
-            aReward = [self.rollingAverageReward]+self.rollingAverageReward_lims
+            aLength = [self.rollingAverageGameLength]+self.rollingAverageGameLength_lims
+            aReward = [self.rollingAverageGameReward]+self.rollingAverageGameReward_lims
             print(f'Last {window} games average length ([min, max]): {aLength[0]:.3f} ([{aLength[1]}, {aLength[2]}])')
             print(f'Last {window} games average reward/step ([min, max]): {aReward[0]:.3f}  ([{aReward[1]:.3f}, {aReward[2]:.3f}])')
         if agent.storeQ:
@@ -163,8 +168,8 @@ class qbmLogger:
             lengths = self.gameLog["Length"][minStep:thisStep]
             rewards = self.gameLog["Reward"][minStep:thisStep]
             avgRewards = self.gameLog["Average Reward"][minStep:thisStep]
-            self.rollingAverageLength = np.mean(lengths)
-            self.rollingAverageLength_lims = [np.min(lengths),np.max(lengths)]
-            self.rollingAverageReward = np.sum(rewards)/(self.rollingAverageLength*self.thisGameWindow)
-            self.rollingAverageReward_lims = [np.min(avgRewards),np.max(avgRewards)]
+            self.rollingAverageGameLength = np.mean(lengths)
+            self.rollingAverageGameLength_lims = [np.min(lengths),np.max(lengths)]
+            self.rollingAverageGameReward = np.sum(rewards)/(self.rollingAverageGameLength*self.thisGameWindow)
+            self.rollingAverageGameReward_lims = [np.min(avgRewards),np.max(avgRewards)]
 
