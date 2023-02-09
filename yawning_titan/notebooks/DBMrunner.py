@@ -17,7 +17,7 @@ from yawning_titan.notebooks.gameDefinitions.gameModes import *
 
 #%% Define game rules and network
 game_mode_config = basicGameRules()
-network_config = getFiveNodeNetwork()
+network_config = get10NodeNetwork()
 
 #%% Build network interface with games rules
 network_interface = NetworkInterface(game_mode=game_mode_config, network=network_config)
@@ -33,13 +33,13 @@ _ = env.reset()
 
 #%% Build an RBM agent and learn
 agent = QBMAgent(env,'RBMtest')
-agent.initRBM(8) # 8 hidden nodes
+agent.initRBM(16) # 16 hidden nodes
 agent.learn(nSteps=1e6)
 agent.exportResults()
 
 
 #%% Build a DBM agent and learn
 agent = QBMAgent(env,'DBMtest')
-agent.initDBM([4,4]) # 8 hidden nodes
+agent.initDBM([8,8]) # 16 hidden nodes
 agent.learn(nSteps=5e5)
 agent.exportResults()

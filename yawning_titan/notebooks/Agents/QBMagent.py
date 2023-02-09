@@ -34,7 +34,7 @@ class QBMAgent:
     def __init__(self,env: GenericNetworkEnv,saveName="QBM",
         beta:float=2,epsilon:float=1e-2,epsilon0:float=1e-10,adaptiveBurninSteps:int=10000,gamma:float=0.9, # Learning hyperparameters
         nRandomSteps:int=1000,pRandomDecay:float=0.99,minPrandom:float=0.01, # Random action choice parameters
-        printRate:int=10000,gameWindow:int=50,stepWindow:int=1000, # Logging options
+        printRate:int=10000,gameWindow:int=100,stepWindow:int=10000, # Logging options
         writeStepLogs:bool=True,writeGameLogs:bool=True,writeWeights:bool=False,writeToTerminal:bool=True, # Logging flags
         SimulateAnneal:bool=True,AnnealToBestAction:bool=False,adaptiveGradient:bool=True,explicitRBM:bool=True, # Annealing flags
         AugmentSamples:bool=True,AugmentScale:int=50,augmentPswitch:float=0.2): # Sample Augmentation options
@@ -90,7 +90,7 @@ class QBMAgent:
         self.augmentPswitch = augmentPswitch# Probability of each individual node switching
       
         # Set Stored Q maximums
-        self.storeQ = self.nObservations<30
+        self.storeQ = self.nObservations<22
         if not self.AnnealToBestAction and not self.storeQ:
             print('Warning: too many observables to store Q values. ''AnnealToBestAction'' flag has been set to ''True''')
             self.AnnealToBestAction = True
@@ -101,7 +101,7 @@ class QBMAgent:
     def initRBM(self,hiddenNodes = 5):
         # Initialise an RBM with random weights, zero weight between hidden nodes
         self.nHidden = hiddenNodes
-        self.hvWeights = np.random.randn(self.nVisible,self.nHidden)
+        self.hvWeights = np.random.uniform(low=-1/self.nHidden,high=0.0,size=(self.nVisible,self.nHidden))
         self.hhWeights = np.zeros((self.nHidden,self.nHidden))
 
         self.nonzeroHV = np.ones_like(self.hvWeights)
@@ -112,8 +112,8 @@ class QBMAgent:
     def initDBM(self,hiddenNodes = [5,5]):
         # Initialise an DBM with random weights
         self.nHidden = sum(hiddenNodes)
-        self.hvWeights = np.random.randn(self.nVisible,self.nHidden)
-        self.hhWeights = np.random.randn(self.nHidden,self.nHidden)
+        self.hvWeights = np.random.uniform(low=-1/self.nHidden,high=0.0,size=(self.nVisible,self.nHidden))
+        self.hhWeights = np.random.randn(self.nHidden,self.nHidden)/self.nHidden
 
         self.nonzeroHV = np.zeros_like(self.hvWeights)
         self.nonzeroHV[0:self.nObservations,0:hiddenNodes[0]] = 1
@@ -442,7 +442,7 @@ class QBMAgent:
             state2 = self.AmendZeroState(state2)
 
             # Choose an action2, calculate Q2
-            Q2, action2, actionI2, _ = self.ChooseAction(state1,randomAction = False)
+            Q2, action2, actionI2, _ = self.ChooseAction(state2,randomAction = False)
 
             # Update weights and Q
             self.updateWeights(scaledReward,Q1,Q2,state1,action1,h1)
