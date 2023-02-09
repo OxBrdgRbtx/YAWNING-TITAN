@@ -32,7 +32,7 @@ class QBMAgent:
 #   learn               - Run the training loop
 
     def __init__(self,env: GenericNetworkEnv,saveName="QBM",
-        beta:float=2,epsilon:float=1e-2,epsilon0:float=1e-10,adaptiveBurninSteps:int=10000,gamma:float=0.9, # Learning hyperparameters
+        beta:float=8,epsilon:float=1e-2,epsilon0:float=1e-10,adaptiveBurninSteps:int=10000,gamma:float=0.9, # Learning hyperparameters
         nRandomSteps:int=1000,pRandomDecay:float=0.99,minPrandom:float=0.01, # Random action choice parameters
         printRate:int=10000,gameWindow:int=100,stepWindow:int=10000, # Logging options
         writeStepLogs:bool=True,writeGameLogs:bool=True,writeWeights:bool=False,writeToTerminal:bool=True, # Logging flags
