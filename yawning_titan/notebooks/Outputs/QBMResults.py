@@ -73,11 +73,12 @@ class QBMResults:
         # Save agent parameters
         fields = ["nActions", "nObservations", "nHidden", "beta", "epsilon", "epsilon0", 
             "adaptiveBurninSteps", "gamma", "nRandomSteps", "pRandomDecay", "minPrandom",
-            "SimulateAnneal", "adaptiveGradient", "AnnealToBestAction", "explicitRBM",
-            "AugmentSamples", "AugmentScale", "augmentPswitch"]
+            "SimulateAnneal", "adaptiveGradient", "AnnealToBestAction", "SimulateAnnealForAction",
+            "explicitRBM", "AugmentSamples", "AugmentScale", "augmentPswitch","batchSize"]
 
         logfile = os.path.join(self.resultsDir,'Metadata.csv')
         with open(logfile,'w') as f:
+            f.write(f"Runtime,{self.agent.log.tEnd-self.agent.log.tStart},\n")
             for field in fields:
                 f.write(f"{field},{self.agent.__getattribute__(field)}\n")
           

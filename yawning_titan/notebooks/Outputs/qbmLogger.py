@@ -43,9 +43,8 @@ class qbmLogger:
             "Q0":[]}
 
         # Set up profiling
-        if writeToTerminal:
-            self.tStart = time.time()
-            self.t0 = time.time()
+        self.tStart = time.time()
+        self.t0 = time.time()
 
     def initNsteps(self,agent,nSteps):
         # Initialise arrays for each log for speed
@@ -59,6 +58,7 @@ class qbmLogger:
         self.stepLog["Q0"] = np.empty((nSteps,agent.nActions))
 
     def tidy(self):
+        self.tEnd = time.time()
         for key in self.gameLog.keys():
             self.gameLog[key] = self.gameLog[key][:self.nGames]
 
