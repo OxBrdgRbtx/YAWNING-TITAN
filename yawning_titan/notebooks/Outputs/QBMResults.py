@@ -85,5 +85,8 @@ class QBMResults:
         # Save game options
         gamefile = os.path.join(self.resultsDir,'gameMode.yml')
         self.agent.env.network_interface.game_mode.to_yaml(gamefile)
+        
+        # Save weights
+        self.agent.saveWeights(self.resultsDir)
 
         

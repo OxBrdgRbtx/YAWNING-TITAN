@@ -88,6 +88,9 @@ class qbmLogger:
             self.stepLog["Q0"][self.step,:] = agent.scaleReward(agent.Qvals[0].copy(),'backward',True)
         self.stepLog["Reward"][self.step] = reward
         self.stepLog["Average Reward"][self.step] = np.sum(self.stepLog["Reward"])/(agent.step)
+        if (Q2 == [] or Q1 == []):
+                Q1 = np.nan
+                Q2 = np.nan
         self.stepLog["Qerror"][self.step] = reward - agent.scaleReward(-agent.gamma*Q2 + Q1,'backward')
 
         minStep = max((0,agent.step-self.stepWindow))
