@@ -84,15 +84,9 @@ class QBMBatchAgent(QBMAgent):
         Hamiltonian = BinaryQuadraticModel.from_numpy_matrix(HamiltonianArray)
         if Hamiltonian.is_linear() and self.explicitRBM:
             pass # Get explicit results - for debug use only
-        elif self.SimulateAnneal:
-            beta0 = min(0.1,self.beta/5)
-            sampler = SimulatedAnnealingSampler()
-            results = sampler.sample(Hamiltonian,num_reads=10,beta_range=[beta0, self.beta]).to_pandas_dataframe()
         else:
-            sampler = LeapHybridSampler() 
-            sampler.sample(Hamiltonian)
+            results = self.sampleHamiltonian(Hamiltonian,self.SimulateAnneal)
         
-
         # Process results
         Q1array = np.zeros((self.batchSize,))
         Q2array = np.zeros((self.batchSize,))

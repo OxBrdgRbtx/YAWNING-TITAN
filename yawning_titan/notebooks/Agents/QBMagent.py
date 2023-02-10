@@ -21,6 +21,7 @@ class QBMAgent:
 #   buildHamiltonian    - Builds a hamiltonian to represent the free energy in the machine, either state and action, or state only are acceptable inputs
 #   calculateFreeEnergy - Calculates the free energy from the hamiltonian and samples of the hamiltonian
 #   evaluateQBM         - Evaluates the boltzmann machine - builds hamiltonian and calculates the energy
+#   sampleHamiltonian   - Sample Hamiltonian via either simulated Annealing or Quantum Annealing
 #   getOptimalAction    - Find the optimal action for a given state. Option to sample BM for lowest energy, or directly choose from saved Q values
 #   getLowEnergyAction  - Find the action that has the lowest energy from a sampled hamiltonian (with action nodes free)
 #   updateQval          - Update the stored Q value for a state, action pair
@@ -260,13 +261,7 @@ class QBMAgent:
             return minusF, h
 
         # Sample Hamiltonian and aggregate results
-        if SimulateAnneal:
-            beta0 = min(0.1,self.beta/5)
-            sampler = SimulatedAnnealingSampler()
-            results = sampler.sample(Hamiltonian,num_reads=10,beta_range=[beta0, self.beta])
-        else:
-            sampler = LeapHybridSampler() 
-            sampler.sample(Hamiltonian)
+        results = self.sampleHamiltonian(Hamiltonian,SimulateAnneal)
         nSamples = len(results.record)
 
         if action == []:
@@ -279,6 +274,16 @@ class QBMAgent:
             # Process results and calculate mean energy, h
             minusF, h = self.calculateFreeEnergy(results,self.beta,Hamiltonian)
             return minusF, h
+
+    def sampleHamiltonian(self,Hamiltonian,SimulateAnneal):
+        if SimulateAnneal:
+            beta0 = min(0.1,self.beta/5)
+            sampler = SimulatedAnnealingSampler()
+            results = sampler.sample(Hamiltonian,num_reads=10,beta_range=[beta0, self.beta])
+        else:
+            sampler = LeapHybridSampler() 
+            sampler.sample(Hamiltonian)
+        return results
 
     def getOptimalAction(self,state):
         stateI = self.getStateI(state)
