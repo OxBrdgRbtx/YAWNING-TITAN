@@ -4,7 +4,7 @@ from yawning_titan.notebooks.Outputs.qbmLogger import qbmLogger
 from yawning_titan.notebooks.Outputs.QBMResults import QBMResults
 
 # import DWAVE model and sampler
-import dimod
+from dimod import BinaryQuadraticModel
 import os
 # try:
 #     from dwave.system import LeapHybridSampler
@@ -36,7 +36,8 @@ class QBMAgent:
         nRandomSteps:int=1000,pRandomDecay:float=0.99,minPrandom:float=0.01, # Random action choice parameters
         printRate:int=10000,gameWindow:int=100,stepWindow:int=10000, # Logging options
         writeStepLogs:bool=True,writeGameLogs:bool=True,writeWeights:bool=False,writeToTerminal:bool=True, # Logging flags
-        SimulateAnneal:bool=True,AnnealToBestAction:bool=False,adaptiveGradient:bool=True,explicitRBM:bool=True, # Annealing flags
+        SimulateAnneal:bool=True,AnnealToBestAction:bool=False,SimulateAnnealForAction=True,  # Annealing flags
+        adaptiveGradient:bool=True,explicitRBM:bool=True, # Annealing flags
         AugmentSamples:bool=True,AugmentScale:int=50,augmentPswitch:float=0.2): # Sample Augmentation options
 
 
@@ -74,10 +75,12 @@ class QBMAgent:
         # Internal counters
         self.step = 0
         self.outerGradSum = []
+        self.batchSize = None
 
         # Set flags
         self.QBMinitialised = False # Flag to check nodes are set up
-        self.SimulateAnneal = SimulateAnneal # Simulate or use D-Wave
+        self.SimulateAnneal = SimulateAnneal # Simulate or use D-Wave for updating Q
+        self.SimulateAnnealForAction = SimulateAnnealForAction # Simulate or use D-Wave for choosing action
         self.adaptiveGradient = adaptiveGradient # Flag to use adaptive gradient method
         self.AnnealToBestAction = AnnealToBestAction # Flag to choose best action via annealing rather than reviewing Q values
         self.explicitRBM = explicitRBM # Solve RBM equations explicitly, without sampling
@@ -155,7 +158,7 @@ class QBMAgent:
             freeAction = False
             nFreeNodes = self.nHidden
             observation = np.concatenate((state,action))
-        Hamiltonian = dimod.BinaryQuadraticModel(nFreeNodes, 'BINARY')
+        Hamiltonian = BinaryQuadraticModel(nFreeNodes, 'BINARY')
         # Build Hamiltonian
         quadTerms = np.zeros((nFreeNodes,nFreeNodes))
         quadTerms[:self.nHidden,:self.nHidden] = -self.hhWeights
@@ -282,7 +285,7 @@ class QBMAgent:
 
         if self.AnnealToBestAction:
             # Sample Hamiltonian to get the action with the lowest energy (highest reward)
-            actionI, Q, h = self.evaluateQBM(state,[],self.SimulateAnneal)
+            actionI, Q, h = self.evaluateQBM(state,[],self.SimulateAnnealForAction)
         elif any(np.isnan(self.Qvals[stateI])):
             # Haven't evaluated Q for all actions yet
             Q = self.Qvals[stateI]
@@ -292,7 +295,7 @@ class QBMAgent:
                 if np.isnan(Q[iA]):
                     action = np.zeros(self.nActions)
                     action[iA] = 1
-                    Q[iA], hA[iA] = self.evaluateQBM(state,action,self.SimulateAnneal)
+                    Q[iA], hA[iA] = self.evaluateQBM(state,action,self.SimulateAnnealForAction)
 
             # Store optimal Q index and value
             self.Qvals[stateI][:] = Q
@@ -332,7 +335,8 @@ class QBMAgent:
 
     def updateQval(self,state,action,Q):
         # Store calculated Q value
-        self.Qvals[self.getStateI(state)][action] = Q
+        if not type(Q)==list: # list if Q==[]
+            self.Qvals[self.getStateI(state)][action] = Q
         return
 
     def getStateI(self,state):
@@ -343,7 +347,7 @@ class QBMAgent:
             stateI = round(np.inner(self.stateMult,state))
         return stateI
 
-    def updateWeights(self,reward,Q1,Q2,state,action,h):
+    def updateWeights(self,reward,Q1,Q2,state,action,h,state_,action_):
         observation = np.concatenate((state,action))
 
 
@@ -409,8 +413,11 @@ class QBMAgent:
             actionI, Q, h = self.getOptimalAction(state)
         action = np.zeros(self.nActions)
         action[actionI] = 1
-        if Q == []:
+        if Q == [] and self.batchSize is None:
             Q, h = self.evaluateQBM(state,action,self.SimulateAnneal)
+        elif not self.batchSize is None:
+            Q = []
+            h = []
         return Q, action, actionI, h
 
     def learn(self,nSteps = 2000):
@@ -445,7 +452,7 @@ class QBMAgent:
             Q2, action2, actionI2, _ = self.ChooseAction(state2,randomAction = False)
 
             # Update weights and Q
-            self.updateWeights(scaledReward,Q1,Q2,state1,action1,h1)
+            self.updateWeights(scaledReward,Q1,Q2,state1,action1,h1,state2,action2)
             if self.storeQ:
                 self.updateQval(state1,actionI1,Q1)
                 self.updateQval(state2,actionI2,Q2)
