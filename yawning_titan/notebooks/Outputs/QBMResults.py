@@ -52,8 +52,10 @@ class QBMResults:
                     thisx = np.array(xdata)
                     thisx = thisx[plotI]
                     plt.scatter(thisx,iC*np.ones_like(thisx))
-                else:
+                elif 'Average' in key:
                     plt.plot(xdata,df[col],label=str(iC))
+                else:
+                    plt.scatter(xdata,df[col],label=str(iC),s=2)
             plt.xlabel(xlabel)
             plt.ylabel(key)              
             if not isDiscrete:
@@ -72,7 +74,7 @@ class QBMResults:
     def saveMetadata(self):
         # Save agent parameters
         fields = ["nActions", "nObservations", "nHidden", "beta", "epsilon", "epsilon0", 
-            "adaptiveBurninSteps", "gamma", "nRandomSteps", "pRandomDecay", "minPrandom",
+            "gamma", "nRandomSteps", "pRandomDecay", "minPrandom",
             "SimulateAnneal", "adaptiveGradient", "AnnealToBestAction", "SimulateAnnealForAction",
             "explicitRBM", "AugmentSamples", "AugmentScale", "augmentPswitch","batchSize"]
 

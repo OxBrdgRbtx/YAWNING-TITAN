@@ -48,7 +48,7 @@ RED:
   red_uses_move_action: False
   move_action_likelihood: 1
   # ZERO DAY: The red agent will pick a safe node connected to an infect node and take it over with a 100% chance to succeed (can only happen every n timesteps)
-  red_uses_zero_day_action: True
+  red_uses_zero_day_action: False
   # The number of zero day attacks that the red agent starts with
   zero_day_start_amount: 1
   # The amount of 'progress' that need to have passed before the red agent gains a zero day attack

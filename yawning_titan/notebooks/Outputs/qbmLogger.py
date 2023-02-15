@@ -6,7 +6,8 @@ from yawning_titan import _YT_ROOT_DIR
 
 class qbmLogger:
     def __init__(self,saveName: str,printRate:int=int(1e4),gameWindow:int=10,stepWindow:int=1000,
-    writeStepLogs:bool=False,writeGameLogs:bool=False,writeWeights:bool=False,writeToTerminal:bool=True):
+    writeStepLogs:bool=False,writeGameLogs:bool=False,writeWeights:bool=False,writeToTerminal:bool=True,
+    writeTerminalToText:bool=True):
         
         # Set up results directory
         self.resultsDir = os.path.join(_YT_ROOT_DIR,'results',saveName)
@@ -21,9 +22,11 @@ class qbmLogger:
         self.writeGameLogs = writeGameLogs
         self.writeWeights = writeWeights
         self.writeToTerminal = writeToTerminal
+        self.writeTerminalToText  = writeTerminalToText
         
         self.newStepLog = True
         self.newGameLog = True
+        self.newTerminalLog = True
 
         # Set up log dicts
         self.gameLog = {"Length":[],
@@ -40,12 +43,20 @@ class qbmLogger:
             "Average Reward": [],
             "Rolling Average Reward": [],
             "Qerror": [],
-            "Q0":[]}
+            "Q0":[],
+			"QPU time": []}
+
+        self.rollingAverageGameLength = 0
+        self.rollingAverageGameReward = 0
 
         # Set up profiling
         self.tStart = time.time()
         self.t0 = time.time()
-
+        self.QPUtime = 0.0
+        self.QPUseconds = 0.0
+        self.QPUminutes = 0
+        self.QPUhours = 0
+   
     def initNsteps(self,agent,nSteps):
         # Initialise arrays for each log for speed
         for key in self.gameLog.keys():
@@ -61,6 +72,17 @@ class qbmLogger:
         self.tEnd = time.time()
         for key in self.gameLog.keys():
             self.gameLog[key] = self.gameLog[key][:self.nGames]
+
+    def addQPUtime(self,qputime):
+        self.QPUtime += qputime
+        self.QPUseconds += qputime/1e6
+        if self.QPUseconds>=60:
+            self.QPUminutes += np.floor(self.QPUseconds/60)
+            self.QPUseconds = self.QPUseconds % 60
+        if self.QPUminutes>=60:
+            self.QPUhours += np.floor(self.QPUminutes/60)
+            self.QPUminutes = self.QPUminutes % 60
+        
 
 
     def update(self,agent,state,action,reward,Q1,Q2,done):
@@ -87,7 +109,7 @@ class qbmLogger:
             self.stepLog["Expected Reward"][self.step,:] = agent.scaleReward(agent.Qvals[agent.getStateI(state)].copy(),'backward',True)
             self.stepLog["Q0"][self.step,:] = agent.scaleReward(agent.Qvals[0].copy(),'backward',True)
         self.stepLog["Reward"][self.step] = reward
-        self.stepLog["Average Reward"][self.step] = np.sum(self.stepLog["Reward"])/(agent.step)
+        self.stepLog["Average Reward"][self.step] = np.sum(self.stepLog["Reward"][0:(self.step+1)])/(agent.step)
         if (Q2 == [] or Q1 == []):
                 Q1 = np.nan
                 Q2 = np.nan
@@ -95,6 +117,8 @@ class qbmLogger:
 
         minStep = max((0,agent.step-self.stepWindow))
         self.stepLog["Rolling Average Reward"][self.step] = np.sum(self.stepLog["Reward"][minStep:agent.step])/(agent.step-minStep)
+		
+        self.stepLog["QPU time"][self.step] = self.QPUtime
 
     def updateGameLog(self,agent):
         nGames = self.nGames
@@ -146,10 +170,12 @@ class qbmLogger:
         periodTime = t1 - self.t0
         self.t0 = t1
 
+
         print('')
         print('Step '+str(agent.step))
         print(f'{totalTime:.1f} seconds elapsed ({periodTime:.1f}s since previous update)')
         print(f'{1000*totalTime/agent.step:.1f}ms/step ({1000*periodTime/self.printRate:.1f}ms/step since previous update)')
+        print(f'{self.QPUtime:.2f} microseconds of QPU time used ({self.QPUhours:0f}h {self.QPUminutes:0f}m {self.QPUseconds:2f}s)')
         print(f'Total Average Reward = {self.stepLog["Average Reward"][self.step]}')
         if self.nGames>0:
             window = self.thisGameWindow
@@ -159,6 +185,30 @@ class qbmLogger:
             print(f'Last {window} games average reward/step ([min, max]): {aReward[0]:.3f}  ([{aReward[1]:.3f}, {aReward[2]:.3f}])')
         if agent.storeQ:
             print(f'Q0 = {self.stepLog["Q0"][self.step]}')
+
+        if self.writeTerminalToText:
+            logFile = os.path.join(self.resultsDir,'log.txt')
+            if self.newTerminalLog:
+                openStr = 'w'
+                self.newTerminalLog = False
+            else:
+                openStr = 'a'
+            try:
+                with open(logFile,openStr) as f:
+                    f.write('Step '+str(agent.step)+'\n')
+                    f.write(f'{totalTime:.1f} seconds elapsed ({periodTime:.1f}s since previous update)\n')
+                    f.write(f'{1000*totalTime/agent.step:.1f}ms/step ({1000*periodTime/self.printRate:.1f}ms/step since previous update)\n')
+                    f.write(f'{self.QPUtime:.2f} microseconds of QPU time used ({self.QPUhours:0f}h {self.QPUminutes:0f}m {self.QPUseconds:2f}s)\n')
+                    f.write(f'Total Average Reward = {self.stepLog["Average Reward"][self.step]}\n')
+                    if self.nGames>0:
+                        f.write(f'Last {window} games average length ([min, max]): {aLength[0]:.3f} ([{aLength[1]}, {aLength[2]}])\n')
+                        f.write(f'Last {window} games average reward/step ([min, max]): {aReward[0]:.3f}  ([{aReward[1]:.3f}, {aReward[2]:.3f}])\n')
+                    if agent.storeQ:
+                        f.write(f'Q0 = {self.stepLog["Q0"][self.step]}\n')
+                    f.write('\n')                                         
+        					
+            except:
+                print(f'Failed writing step log to log.txt')
 
     def getRollingAverageGame(self):
         if self.nGames>0:

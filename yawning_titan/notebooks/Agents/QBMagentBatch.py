@@ -86,7 +86,7 @@ class QBMBatchAgent(QBMAgent):
             pass # Get explicit results - for debug use only
         else:
             results = self.sampleHamiltonian(Hamiltonian,self.SimulateAnneal)
-        
+            results = results.to_pandas_dataframe()
         # Process results
         Q1array = np.zeros((self.batchSize,))
         Q2array = np.zeros((self.batchSize,))

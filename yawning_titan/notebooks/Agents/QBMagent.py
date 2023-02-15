@@ -6,11 +6,8 @@ from yawning_titan.notebooks.Outputs.QBMResults import QBMResults
 # import DWAVE model and sampler
 from dimod import BinaryQuadraticModel
 import os
-# try:
-#     from dwave.system import LeapHybridSampler
-# except:
-#     pass
-from dwave.samplers import SimulatedAnnealingSampler
+from dwave.system import EmbeddingComposite, DWaveSampler
+from dimod import SimulatedAnnealingSampler
 
 class QBMAgent:
 #   QBMAgent - An agent that implements a Boltzmann machine (either Reduced BM or Deep BM) based reinforcement learning.
@@ -33,10 +30,11 @@ class QBMAgent:
 #   learn               - Run the training loop
 
     def __init__(self,env: GenericNetworkEnv,saveName="QBM",
-        beta:float=8,epsilon:float=1e-2,epsilon0:float=1e-10,adaptiveBurninSteps:int=10000,gamma:float=0.9, # Learning hyperparameters
-        nRandomSteps:int=1000,pRandomDecay:float=0.99,minPrandom:float=0.01, # Random action choice parameters
+        beta:float=8,epsilon:float=1e-2,epsilon0:float=1e-5,gamma:float=0.9, # Learning hyperparameters
+        nRandomSteps:int=0,pRandomDecay:float=0.9999,minPrandom:float=0.001, # Random action choice parameters
         printRate:int=10000,gameWindow:int=100,stepWindow:int=10000, # Logging options
-        writeStepLogs:bool=True,writeGameLogs:bool=True,writeWeights:bool=False,writeToTerminal:bool=True, # Logging flags
+        writeStepLogs:bool=True,writeGameLogs:bool=True,writeWeights:bool=False, # Logging flags
+        writeToTerminal:bool=True,writeTerminalToText:bool=True, # More logging flags
         SimulateAnneal:bool=True,AnnealToBestAction:bool=False,SimulateAnnealForAction=True,  # Annealing flags
         adaptiveGradient:bool=True,explicitRBM:bool=True, # Annealing flags
         AugmentSamples:bool=True,AugmentScale:int=50,augmentPswitch:float=0.2): # Sample Augmentation options
@@ -54,7 +52,6 @@ class QBMAgent:
         self.beta = beta # Thermodynamic beta in free energy calculations (also used in simulated annealing)
         self.epsilon = epsilon # Update step length
         self.epsilon0 = epsilon0 # For use with adaptive gradient - minimum epsilon
-        self.adaptiveBurninSteps = adaptiveBurninSteps # For use with adaptive gradient - minimum epsilon
         self.gamma = gamma # Weight on future reward
 
         # Random action choice parameters
@@ -71,7 +68,8 @@ class QBMAgent:
             writeStepLogs=writeStepLogs, # Write summary step logs to .txt files periodically during training
             writeGameLogs=writeGameLogs, # Write summary game logs to .txt files after each game
             writeWeights=writeWeights, # Save weights to .txt files periodically during training
-            writeToTerminal=writeToTerminal) # Print results to terminal periodically
+            writeToTerminal=writeToTerminal, # Print results to terminal periodically
+            writeTerminalToText=writeTerminalToText) # Write printed terminal output to text file
 
         # Internal counters
         self.step = 0
@@ -85,6 +83,11 @@ class QBMAgent:
         self.adaptiveGradient = adaptiveGradient # Flag to use adaptive gradient method
         self.AnnealToBestAction = AnnealToBestAction # Flag to choose best action via annealing rather than reviewing Q values
         self.explicitRBM = explicitRBM # Solve RBM equations explicitly, without sampling
+        # Set up samplers
+        if SimulateAnneal or SimulateAnnealForAction:
+            self.simulatedSampler = SimulatedAnnealingSampler()
+        if (not SimulateAnneal) or (not SimulateAnnealForAction):
+            self.quantumSampler = EmbeddingComposite(DWaveSampler())
 
         # Augment sample options
         # For each sampled state, produce {AugmentScale} copies of the state, where each node is switched
@@ -117,7 +120,7 @@ class QBMAgent:
         # Initialise an DBM with random weights
         self.nHidden = sum(hiddenNodes)
         self.hvWeights = np.random.uniform(low=-1/self.nHidden,high=0.0,size=(self.nVisible,self.nHidden))
-        self.hhWeights = np.random.randn(self.nHidden,self.nHidden)/self.nHidden
+        self.hhWeights = np.random.uniform(low=-1/self.nHidden,high=0.0,size=(self.nHidden,self.nHidden))
 
         self.nonzeroHV = np.zeros_like(self.hvWeights)
         self.nonzeroHV[0:self.nObservations,0:hiddenNodes[0]] = 1
@@ -217,13 +220,14 @@ class QBMAgent:
         entropy = 0.0
         Zv = 0.0
         h = np.zeros((self.nHidden,self.nHidden))
+        minEnergy = min([record[1] for record in resAgg]) # Stop overflowing exp
         for record in resAgg:
-            Zv += np.exp(-record[1] * beta)
+            Zv += np.exp(-(record[1]-minEnergy) * beta)
 
         # For each record, calculate probability, mean hamiltonian contribution,
         # entropy contribution and h interaction contributions
         for record in resAgg:
-            pEnergy = np.exp(-record[1] * beta)/Zv
+            pEnergy = np.exp(-(record[1]-minEnergy) * beta)/Zv
 
             HamAvg += record[1] * pEnergy
             entropy += pEnergy * np.log(pEnergy)
@@ -279,10 +283,11 @@ class QBMAgent:
         if SimulateAnneal:
             beta0 = min(0.1,self.beta/5)
             sampler = SimulatedAnnealingSampler()
-            results = sampler.sample(Hamiltonian,num_reads=10,beta_range=[beta0, self.beta])
+            results = self.simulatedSampler.sample(Hamiltonian,num_reads=10,beta_range=[beta0, self.beta])
         else:
-            sampler = LeapHybridSampler() 
-            sampler.sample(Hamiltonian)
+            results = self.quantumSampler.sample(Hamiltonian,num_reads=10)
+            self.log.addQPUtime(results.info["timing"]["qpu_access_time"])
+			
         return results
 
     def getOptimalAction(self,state):
@@ -362,7 +367,7 @@ class QBMAgent:
 
         hvGradient = (reward + self.gamma*Q2 - Q1)*np.outer(observation,np.diag(h)) # Technically -gradient
         hvGradient = hvGradient * self.nonzeroHV
-        if self.adaptiveGradient and self.step>self.adaptiveBurninSteps:
+        if self.adaptiveGradient:
             # If applying adaptive gradients, calculate scale
             self.outerGradSum[0] += hvGradient**2
             outerGradSum_ = self.outerGradSum[0] 
@@ -374,7 +379,7 @@ class QBMAgent:
 
         hhGradient = (reward + self.gamma*Q2 - Q1)*h # Technically -gradient
         hhGradient = hhGradient * self.nonzeroHH
-        if self.adaptiveGradient and self.step>self.adaptiveBurninSteps:
+        if self.adaptiveGradient:
             # If applying adaptive gradients, calculate scale
             self.outerGradSum[1] += hhGradient**2
             outerGradSum_ = self.outerGradSum[1] 
@@ -479,4 +484,3 @@ class QBMAgent:
             results.plotAll(showFigs=showFigs,saveFigs=saveFigs)
         if storeMeta:
             results.saveMetadata()
-
