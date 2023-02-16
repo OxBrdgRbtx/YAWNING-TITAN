@@ -34,32 +34,33 @@ _ = env.reset()
 
 #%% Set scenario baselines
 nSteps = 1000
-printRate = 100
-dbmSize = [8,8]
+printRate = 100 # nSteps between printing to log/terminal
+dbmSize = [8,8] # DBM shape, RBM is set up to have equal number of hidden nodes
 epsilon = 0.1
 gamma = 0.98
+pRandomDecay = 0.95 # Added for 1000 step case - Smaller pRandom than default so decay happens within 1000 steps
 name = 'test'
 
 #%% Build an RBM agent and learn via explicit calculation
-agent = QBMAgent(env,'RBM'+name,epsilon=epsilon,gamma=gamma,printRate=printRate)
+agent = QBMAgent(env,'RBM'+name,epsilon=epsilon,gamma=gamma,printRate=printRate,pRandomDecay=pRandomDecay)
 agent.initRBM(sum(dbmSize))
 agent.learn(nSteps=nSteps)
 agent.exportResults()
 
 #%% Build a DBM agent and learn via Simulated Annealing
-agent = QBMAgent(env,'QBM'+name+'Simulated',epsilon=epsilon,gamma=gamma,printRate=printRate)
+agent = QBMAgent(env,'QBM'+name+'Simulated',epsilon=epsilon,gamma=gamma,printRate=printRate,pRandomDecay=pRandomDecay)
 agent.initDBM(dbmSize)
 agent.learn(nSteps=nSteps)
 agent.exportResults()
 
 #%% Build a DBM agent and learn via Quantum Annealing
-agent = QBMAgent(env,'QBM'+name+'Quantum',epsilon=epsilon,gamma=gamma,printRate=printRate,SimulateAnneal=False,SimulateAnnealForAction=True,AnnealToBestAction=True)
+agent = QBMAgent(env,'QBM'+name+'Quantum',epsilon=epsilon,gamma=gamma,printRate=printRate,pRandomDecay=pRandomDecay,SimulateAnneal=False,SimulateAnnealForAction=True,AnnealToBestAction=True)
 agent.initDBM(dbmSize)
 agent.learn(nSteps=nSteps)
 agent.exportResults()
 
 #%% Build a DBM agent and learn via batched Quantum Annealing
-agent = QBMBatchAgent(env,'QBM'+name+'QuantumBatch',epsilon=epsilon,gamma=gamma,printRate=printRate,SimulateAnneal=False,SimulateAnnealForAction=True,AnnealToBestAction=True)
+agent = QBMBatchAgent(env,'QBM'+name+'QuantumBatch',epsilon=epsilon,gamma=gamma,printRate=printRate,pRandomDecay=pRandomDecay,SimulateAnneal=False,SimulateAnnealForAction=True,AnnealToBestAction=True)
 agent.setBatchSize(batchSize=5)
 agent.initDBM(dbmSize)
 agent.learn(nSteps=nSteps)

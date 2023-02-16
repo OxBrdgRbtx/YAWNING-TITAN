@@ -198,7 +198,7 @@ class qbmLogger:
                     f.write('Step '+str(agent.step)+'\n')
                     f.write(f'{totalTime:.1f} seconds elapsed ({periodTime:.1f}s since previous update)\n')
                     f.write(f'{1000*totalTime/agent.step:.1f}ms/step ({1000*periodTime/self.printRate:.1f}ms/step since previous update)\n')
-                    f.write(f'{self.QPUtime:.2f} microseconds of QPU time used ({self.QPUhours:0f}h {self.QPUminutes:0f}m {self.QPUseconds:2f}s)\n')
+                    f.write(f'{self.QPUtime:.2f} microseconds of QPU time used ({self.QPUhours:.0f}h {self.QPUminutes:.0f}m {self.QPUseconds:.2f}s)\n')
                     f.write(f'Total Average Reward = {self.stepLog["Average Reward"][self.step]}\n')
                     if self.nGames>0:
                         f.write(f'Last {window} games average length ([min, max]): {aLength[0]:.3f} ([{aLength[1]}, {aLength[2]}])\n')

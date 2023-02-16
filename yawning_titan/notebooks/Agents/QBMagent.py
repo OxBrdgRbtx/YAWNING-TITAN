@@ -282,7 +282,6 @@ class QBMAgent:
     def sampleHamiltonian(self,Hamiltonian,SimulateAnneal):
         if SimulateAnneal:
             beta0 = min(0.1,self.beta/5)
-            sampler = SimulatedAnnealingSampler()
             results = self.simulatedSampler.sample(Hamiltonian,num_reads=10,beta_range=[beta0, self.beta])
         else:
             results = self.quantumSampler.sample(Hamiltonian,num_reads=10)
@@ -296,6 +295,10 @@ class QBMAgent:
         if self.AnnealToBestAction:
             # Sample Hamiltonian to get the action with the lowest energy (highest reward)
             actionI, Q, h = self.evaluateQBM(state,[],self.SimulateAnnealForAction)
+            if self.SimulateAnnealForAction and not self.SimulateAnneal:
+                # Chosen action via SA, but want Q from QA
+                Q = []
+                h = []
         elif any(np.isnan(self.Qvals[stateI])):
             # Haven't evaluated Q for all actions yet
             Q = self.Qvals[stateI]

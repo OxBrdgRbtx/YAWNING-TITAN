@@ -27,9 +27,6 @@ class QBMBatchAgent(QBMAgent):
             if self.nHidden * self.batchSize * 2 > maxBits:
                 print(f'Warning: batchSize * (number of hidden units * 2) ({self.nHidden * self.batchSize * 2}) is larger than the maximum number of bits ({maxBits})')
         
-        if self.AnnealToBestAction:
-            1/0 # Can't batch run but also anneal to a best action
-            # Idea - Simulate annealing for best action if really desired?
         self.batchRewards = np.zeros((self.batchSize,))
         self.batchStates  = np.zeros((self.batchSize,self.nObservations))
         self.batchStates2  = np.zeros((self.batchSize,self.nObservations))
