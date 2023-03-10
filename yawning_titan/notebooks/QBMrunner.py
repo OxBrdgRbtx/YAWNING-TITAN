@@ -56,13 +56,13 @@ agent.learn(nSteps=nSteps*longRBMscale)
 agent.exportResults()
 
 
-# # #%% Build a DBM agent and learn via batched Quantum Annealing
-# agent = QBMBatchAgent(env,'FullRuns\\QBM_'+name+'QuantumBatch',
-#               epsilon=epsilon,gamma=gamma,printRate=printRate,
-#               pRandomDecay=pRandomDecay,minPrandom=minPrandom,SimulateAnneal=False,
-#               SimulateAnnealForAction=False,AnnealToBestAction=True,writeWeights=True)
-# agent.setBatchSize(batchSize=1)
-# agent.initDBM(dbmSize)
-# agent.learn(nSteps=nSteps)
-# agent.exportResults()
+# #%% Build a DBM agent and learn via batched Quantum Annealing
+agent = QBMBatchAgent(env,'FullRuns\\QBM_'+name+'QuantumBatch',
+              epsilon=epsilon,gamma=gamma,printRate=printRate,
+              pRandomDecay=pRandomDecay,minPrandom=minPrandom,SimulateAnneal=False,
+              SimulateAnnealForAction=False,AnnealToBestAction=True,writeWeights=True)
+agent.setBatchSize(batchSize=1)
+agent.initDBM(dbmSize)
+agent.learn(nSteps=nSteps)
+agent.exportResults()
 
