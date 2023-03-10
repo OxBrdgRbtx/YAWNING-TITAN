@@ -5,9 +5,7 @@ from stable_baselines3.common.env_checker import check_env
 from yawning_titan.envs.generic.core.blue_interface import BlueInterface
 from yawning_titan.envs.generic.core.red_interface import RedInterface
 from yawning_titan.envs.generic.generic_env import GenericNetworkEnv
-from yawning_titan.envs.generic.generic_env_BlueFirst import GenericNetworkEnvBF
 from yawning_titan.envs.generic.core.network_interface import NetworkInterface
-from yawning_titan.config.game_modes import default_game_mode_path
 
 # Get agent and definition functions
 from yawning_titan.notebooks.Agents.QBMagentBatch import QBMBatchAgent

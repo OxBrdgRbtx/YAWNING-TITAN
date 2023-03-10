@@ -1,7 +1,6 @@
 import os
 import numpy as np
 import time
-from yawning_titan import _YT_ROOT_DIR
 from yawning_titan.notebooks.Outputs.QBMResults import QBMResults
 
 
@@ -11,7 +10,7 @@ class qbmLogger:
     writeTerminalToText:bool=True):
         
         # Set up results directory
-        self.resultsDir = os.path.join(_YT_ROOT_DIR,'results',saveName)
+        self.resultsDir = os.path.join('results',saveName)
         if not os.path.isdir(self.resultsDir) and (writeStepLogs or writeGameLogs or writeWeights):
             os.makedirs(self.resultsDir)
         

@@ -398,12 +398,14 @@ class NetworkInterface:
                     self.possible_high_value_targets.append(current)
                     result.pop(current)
 
-        if self.gr_loss_hvt:
-            self.high_value_target = random.choices(
-                population=self.possible_high_value_targets, k=1
-            )[0]
+            if self.gr_loss_hvt:
+                self.high_value_target = random.choices(
+                    population=self.possible_high_value_targets, k=1
+                )[0]
+            else:
+                self.high_value_target = None
         else:
-            self.high_value_target = None
+            self.high_value_target = high_value_target
 
         # initialises the deceptive nodes and their names and amount
         self.deceptive_nodes = []
@@ -822,7 +824,7 @@ class NetworkInterface:
         compromised_state = []
         if self.obs_compromised_status:
             compromised_state = np.asarray(
-                list(self.get_attributes_from_key("true_compromised_status").values())
+                list(self.get_attributes_from_key("blue_view_compromised_status").values())
             )
             compromised_state = np.pad(compromised_state, (0, open_spaces), "constant")
         # Gets the vulnerability score of all of the nodes

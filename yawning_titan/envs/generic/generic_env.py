@@ -261,7 +261,7 @@ class GenericNetworkEnv(gym.Env):
             # if the total number of steps reaches the set end then the blue agent wins and is rewarded accordingly
             if self.current_duration == self.network_interface.gr_max_steps:
                 if self.network_interface.reward_end_multiplier:
-                    reward = self.network_interface.reward_end_multiplier * (
+                    reward = self.network_interface.reward_success * (
                         len(self.network_interface.get_nodes(filter_true_safe=True))
                         / self.network_interface.get_number_of_nodes()
                     )

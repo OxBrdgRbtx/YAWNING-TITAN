@@ -5,8 +5,6 @@ from stable_baselines3.common.env_checker import check_env
 from yawning_titan.envs.generic.core.blue_interface import BlueInterface
 from yawning_titan.envs.generic.core.red_interface import RedInterface
 from yawning_titan.envs.generic.generic_env import GenericNetworkEnv
-from yawning_titan.envs.generic.core.network_interface import NetworkInterface
-from yawning_titan.config.game_modes import default_game_mode_path
 
 # Get agent and definition functions
 from yawning_titan.notebooks.Agents.QBMagentBatch import QBMBatchAgent
@@ -16,11 +14,8 @@ from yawning_titan.notebooks.gameDefinitions.gameModes import *
 
 
 #%% Define game rules and network
-game_mode_config = QBMGameRules()
-network_config = get10NodeNetwork()
-
-#%% Build network interface with games rules
-network_interface = NetworkInterface(game_mode=game_mode_config, network=network_config)
+game_mode_path = QBMGameRules()
+network_interface = get10NodeNetwork(game_mode_path)
 
 #%% Define agents and environment
 red = RedInterface(network_interface)

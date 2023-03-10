@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import os
-from yawning_titan import _YT_ROOT_DIR
 from matplotlib import pyplot as plt
 
 class QBMResults:
