@@ -85,8 +85,8 @@ class QBMAgent:
         self.AnnealToBestAction = AnnealToBestAction # Flag to choose best action via annealing rather than reviewing Q values
         self.explicitRBM = explicitRBM # Solve RBM equations explicitly, without sampling
         # Set up samplers
+        self.simulatedSampler = SimulatedAnnealingSampler()
         if SimulateAnneal or SimulateAnnealForAction:
-            self.simulatedSampler = SimulatedAnnealingSampler()
             if (not SimulateAnneal) or (not SimulateAnnealForAction):
                 # First if case makes this exclusive OR
                 self.quantumSampler = [LazyFixedEmbeddingComposite(DWaveSampler())]

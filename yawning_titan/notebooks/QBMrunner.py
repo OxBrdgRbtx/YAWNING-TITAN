@@ -60,7 +60,7 @@ agent.exportResults()
 agent = QBMBatchAgent(env,'FullRuns\\QBM_'+name+'QuantumBatch',
               epsilon=epsilon,gamma=gamma,printRate=printRate,
               pRandomDecay=pRandomDecay,minPrandom=minPrandom,SimulateAnneal=False,
-              SimulateAnnealForAction=False,AnnealToBestAction=True,writeWeights=True)
+              SimulateAnnealForAction=False,AnnealToBestAction=False,writeWeights=True)
 agent.setBatchSize(batchSize=1)
 agent.initDBM(dbmSize)
 agent.learn(nSteps=nSteps)

@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import os
 from matplotlib import pyplot as plt
+import yaml
 
 class QBMResults:
     def __init__(self,Agent):
@@ -85,7 +86,8 @@ class QBMResults:
           
         # Save game options
         gamefile = os.path.join(self.resultsDir,'gameMode.yml')
-        self.agent.env.network_interface.settings.to_yaml(gamefile)
+        with open(gamefile, "w") as file:
+            yaml.safe_dump(self.agent.env.network_interface.settings, file)
         
         # Save weights
         self.agent.saveWeights(self.resultsDir)
