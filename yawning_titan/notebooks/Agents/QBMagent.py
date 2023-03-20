@@ -30,14 +30,14 @@ class QBMAgent:
 #   learn               - Run the training loop
 
     def __init__(self,env: GenericNetworkEnv,saveName="QBM",
-        beta:float=8,SAbeta:float=2,epsilon:float=1e-2,epsilon0:float=1e-5,gamma:float=0.9, # Learning hyperparameters
+        beta:float=5,SAbeta:float=2,epsilon:float=1e-2,epsilon0:float=1e-5,gamma:float=0.9, # Learning hyperparameters
         nRandomSteps:int=0,pRandomDecay:float=0.9999,minPrandom:float=0.001, # Random action choice parameters
         printRate:int=10000,gameWindow:int=100,stepWindow:int=10000, # Logging options
         writeStepLogs:bool=True,writeGameLogs:bool=True,writeWeights:bool=False, # Logging flags
         writeToTerminal:bool=True,writeTerminalToText:bool=True, # More logging flags
         SimulateAnneal:bool=True,AnnealToBestAction:bool=False,SimulateAnnealForAction=True,  # Annealing flags
         adaptiveGradient:bool=True,explicitRBM:bool=True, # Annealing flags
-        AugmentSamples:bool=True,AugmentScale:int=50,augmentPswitch:float=0.2): # Sample Augmentation options
+        AugmentSamples:bool=True,AugmentScale:int=100,augmentPswitch:float=0.1): # Sample Augmentation options
 
 
         self.env = env
@@ -114,7 +114,7 @@ class QBMAgent:
     def initRBM(self,hiddenNodes = 5):
         # Initialise an RBM with random weights, zero weight between hidden nodes
         self.nHidden = hiddenNodes
-        self.hvWeights = np.random.uniform(low=0.0,high=0.5/self.nHidden,size=(self.nVisible,self.nHidden))
+        self.hvWeights = np.random.normal(loc=0.0,scale=1e-3,size=(self.nVisible,self.nHidden))
         self.hhWeights = np.zeros((self.nHidden,self.nHidden))
 
         self.nonzeroHV = np.ones_like(self.hvWeights)
@@ -125,8 +125,8 @@ class QBMAgent:
     def initDBM(self,hiddenNodes = [5,5]):
         # Initialise an DBM with random weights
         self.nHidden = sum(hiddenNodes)
-        self.hvWeights = np.random.uniform(low=0.0,high=1/self.nHidden,size=(self.nVisible,self.nHidden))
-        self.hhWeights = np.random.uniform(low=-1/self.nHidden,high=0.0,size=(self.nHidden,self.nHidden))
+        self.hvWeights = np.random.normal(loc=0.0,scale=1e-3,size=(self.nVisible,self.nHidden))
+        self.hhWeights = np.random.normal(loc=0.0,scale=1e-3,size=(self.nHidden,self.nHidden))
 
         self.nonzeroHV = np.zeros_like(self.hvWeights)
         self.nonzeroHV[0:self.nObservations,0:hiddenNodes[0]] = 1
@@ -145,17 +145,24 @@ class QBMAgent:
         self.QBMinitialised = True
 
     def loadWeights(self,resultsDir):
-        self.hvWeights = os.path.join(resultsDir,'hvWeights.txt')
-        self.hhWeights = os.path.join(resultsDir,'hhWeights.txt')
+        self.hvWeights = np.loadtxt(os.path.join(resultsDir,'hvWeights.txt'),delimiter=',')
+        self.hhWeights = np.loadtxt(os.path.join(resultsDir,'hhWeights.txt'),delimiter=',')
 
         self.nHidden = np.shape(self.hvWeights)[0]
         self.nonzeroHV = (self.hvWeights != 0).astype(int)
         self.nonzeroHH = (self.hhWeights != 0).astype(int)
         self.QBMinitialised = True
 
+        self.outerGradSum[0] = np.loadtxt(os.path.join(resultsDir,'hvGradscale.txt'),delimiter=',')
+        self.outerGradSum[1] = np.loadtxt(os.path.join(resultsDir,'hhGradscale.txt'),delimiter=',')
+
+
+
     def saveWeights(self,resultsDir):
         np.savetxt(os.path.join(resultsDir,'hvWeights.txt'),self.hvWeights,delimiter=',')
         np.savetxt(os.path.join(resultsDir,'hhWeights.txt'),self.hhWeights,delimiter=',')
+        np.savetxt(os.path.join(resultsDir,'hvGradscale.txt'),self.outerGradSum[0],delimiter=',')
+        np.savetxt(os.path.join(resultsDir,'hhGradscale.txt'),self.outerGradSum[1],delimiter=',')
 
     def buildHamiltonian(self,state,action):
         if action == []:
@@ -205,14 +212,26 @@ class QBMAgent:
             for record in records:
                 resAug += [[record[0],record[1]]]
                 sampAgg += [record[0]]
-                for iAdd in range(self.AugmentScale):
-                    # Probability for getting all nodes to switch at least once is
-                    # (1-(1-augmentPswitch)^AugmentScale)^nHidden
-                    flipBit = np.random.rand(self.nHidden)<self.augmentPswitch 
+
+                # First augment by flipping each bit individually
+                for iFlip in range(self.nHidden):
+                    flipBit = np.zeros(self.nHidden)
+                    flipBit[iFlip] = 1
                     thisSamp = np.mod(record[0] + flipBit,2)
                     thisEnergy = Hamiltonian.energy(thisSamp)
                     resAug += [[thisSamp,thisEnergy]]
                     sampAgg += [thisSamp]
+
+                    # Then flip pairs of bits
+                    for iFlip2 in range(iFlip+1,self.nHidden):
+                        flipBit = np.zeros(self.nHidden)
+                        flipBit[iFlip] = 1
+                        flipBit[iFlip2] = 1
+                        thisSamp = np.mod(record[0] + flipBit,2)
+                        thisEnergy = Hamiltonian.energy(thisSamp)
+                        resAug += [[thisSamp,thisEnergy]]
+                        sampAgg += [thisSamp]
+                
             _,uInds = np.unique(np.array(sampAgg),axis=0,return_index=True)
             resAgg = [resAug[iU] for iU in uInds]
         else:
@@ -298,11 +317,11 @@ class QBMAgent:
             else:
                 iSampler = 1 # If sampling for action, need two separate fixed embeddings
             try:
-                results = self.quantumSampler[iSampler].sample(Hamiltonian,num_reads=10)
+                results = self.quantumSampler[iSampler].sample(Hamiltonian,num_reads=100)
                 self.log.addQPUtime(results.info["timing"]["qpu_access_time"])
             except:
                 beta0 = min(0.1,self.SAbeta/5)
-                results = self.simulatedSampler.sample(Hamiltonian,num_reads=10,beta_range=[beta0, self.SAbeta])
+                results = self.simulatedSampler.sample(Hamiltonian,num_reads=100,beta_range=[beta0, self.SAbeta])
                 self.log.QPUfail(self.step)
         return results
 
