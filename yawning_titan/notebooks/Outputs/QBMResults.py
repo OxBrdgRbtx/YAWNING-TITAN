@@ -76,7 +76,7 @@ class QBMResults:
         fields = ["nActions", "nObservations", "nHidden", "beta", "epsilon", "epsilon0", 
             "gamma", "nRandomSteps", "pRandomDecay", "minPrandom",
             "SimulateAnneal", "adaptiveGradient", "AnnealToBestAction", "SimulateAnnealForAction",
-            "explicitRBM", "AugmentSamples", "AugmentScale", "augmentPswitch","batchSize"]
+            "explicitRBM", "AugmentSamples","annealNumReads","batchSize"]
 
         logfile = os.path.join(self.resultsDir,'Metadata.csv')
         with open(logfile,'w') as f:

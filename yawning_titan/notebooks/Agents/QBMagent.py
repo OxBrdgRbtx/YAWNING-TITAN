@@ -37,7 +37,7 @@ class QBMAgent:
         writeToTerminal:bool=True,writeTerminalToText:bool=True, # More logging flags
         SimulateAnneal:bool=True,AnnealToBestAction:bool=False,SimulateAnnealForAction=True,  # Annealing flags
         adaptiveGradient:bool=True,explicitRBM:bool=True, # Annealing flags
-        AugmentSamples:bool=True,AugmentScale:int=100,augmentPswitch:float=0.1): # Sample Augmentation options
+        AugmentSamples:bool=True,annealNumReads:int=100): # Sample count options
 
 
         self.env = env
@@ -96,12 +96,10 @@ class QBMAgent:
             self.quantumSampler = [LazyFixedEmbeddingComposite(DWaveSampler()), LazyFixedEmbeddingComposite(DWaveSampler())]
 
         # Augment sample options
-        # For each sampled state, produce {AugmentScale} copies of the state, where each node is switched
-        # with probability {augmentPswitch}. This helps to improve the estimated values of <H> and <h>.
+        # For each sampled state, create copies of the state, where each node is switched, and each pair of nodes is switched
         self.AugmentSamples = AugmentSamples
-        self.AugmentScale = AugmentScale
-        self.augmentPswitch = augmentPswitch# Probability of each individual node switching
-      
+        self.annealNumReads = annealNumReads
+
         # Set Stored Q maximums
         self.storeQ = self.nObservations<22
         if not self.AnnealToBestAction and not self.storeQ:
@@ -307,7 +305,7 @@ class QBMAgent:
     def sampleHamiltonian(self,Hamiltonian,SimulateAnneal):
         if SimulateAnneal:
             beta0 = min(0.1,self.SAbeta/5)
-            results = self.simulatedSampler.sample(Hamiltonian,num_reads=10,beta_range=[beta0, self.SAbeta])
+            results = self.simulatedSampler.sample(Hamiltonian,num_reads=self.annealNumReads,beta_range=[beta0, self.SAbeta])
         else:
             nHidden = self.nHidden
             if self.batchSize is not None:
@@ -317,11 +315,11 @@ class QBMAgent:
             else:
                 iSampler = 1 # If sampling for action, need two separate fixed embeddings
             try:
-                results = self.quantumSampler[iSampler].sample(Hamiltonian,num_reads=100)
+                results = self.quantumSampler[iSampler].sample(Hamiltonian,num_reads=self.annealNumReads)
                 self.log.addQPUtime(results.info["timing"]["qpu_access_time"])
             except:
                 beta0 = min(0.1,self.SAbeta/5)
-                results = self.simulatedSampler.sample(Hamiltonian,num_reads=100,beta_range=[beta0, self.SAbeta])
+                results = self.simulatedSampler.sample(Hamiltonian,num_reads=self.annealNumReads,beta_range=[beta0, self.SAbeta])
                 self.log.QPUfail(self.step)
         return results
 
