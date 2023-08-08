@@ -6,8 +6,10 @@ from yawning_titan.notebooks.Outputs.QBMResults import QBMResults
 # import DWAVE model and sampler
 from dimod import BinaryQuadraticModel
 import os
-from dwave.system import LazyFixedEmbeddingComposite, DWaveSampler
+from dwave.system import FixedEmbeddingComposite, LazyFixedEmbeddingComposite, DWaveSampler
+
 from dimod import SimulatedAnnealingSampler
+import json
 
 class QBMAgent:
 #   QBMAgent - An agent that implements a Boltzmann machine (either Reduced BM or Deep BM) based reinforcement learning.
@@ -37,7 +39,9 @@ class QBMAgent:
         writeToTerminal:bool=True,writeTerminalToText:bool=True, # More logging flags
         SimulateAnneal:bool=True,AnnealToBestAction:bool=False,SimulateAnnealForAction=True,  # Annealing flags
         adaptiveGradient:bool=True,explicitRBM:bool=True, # Annealing flags
-        AugmentSamples:bool=True,annealNumReads:int=100): # Sample count options
+        AugmentSamples:bool=True,nParallelAnneals:int=1, # Sampling assistance options
+        numReads:int=100,convergenceCheckInterval:int=200, # Sample size options
+        maximumQPUminutes:float=60): 
 
 
         self.env = env
@@ -90,15 +94,25 @@ class QBMAgent:
             if (not SimulateAnneal) or (not SimulateAnnealForAction):
                 # First if case makes this exclusive OR
                 self.quantumSampler = [LazyFixedEmbeddingComposite(DWaveSampler())]
+                self.embeddingLoaded = [False]
         else:
             # (not SimulateAnneal) AND (not SimulateAnnealForAction)
             # Need two different embeddings
             self.quantumSampler = [LazyFixedEmbeddingComposite(DWaveSampler()), LazyFixedEmbeddingComposite(DWaveSampler())]
-
+            self.embeddingLoaded = [False,False]
         # Augment sample options
         # For each sampled state, create copies of the state, where each node is switched, and each pair of nodes is switched
         self.AugmentSamples = AugmentSamples
-        self.annealNumReads = annealNumReads
+        self.augmentPswitch = augmentPswitch# Probability of each individual node switching
+        self.nParallelAnneals = nParallelAnneals # Number of parallel solves of the same Hamiltonian
+        
+        # Number of reads and convergence check options
+        self.numReads = numReads # number of QPU reads
+        self.convergenceCheckInterval = convergenceCheckInterval # number of steps between convergence checks
+        self.lastConvergenceCheck = 0
+
+        # QPU limits
+        self.maximumQPUminutes = maximumQPUminutes # maximum QPU time to spend
 
         # Set Stored Q maximums
         self.storeQ = self.nObservations<22
@@ -112,6 +126,7 @@ class QBMAgent:
     def initRBM(self,hiddenNodes = 5):
         # Initialise an RBM with random weights, zero weight between hidden nodes
         self.nHidden = hiddenNodes
+        self.hiddenLayerSizes = [hiddenNodes]
         self.hvWeights = np.random.normal(loc=0.0,scale=1e-3,size=(self.nVisible,self.nHidden))
         self.hhWeights = np.zeros((self.nHidden,self.nHidden))
 
@@ -123,6 +138,7 @@ class QBMAgent:
     def initDBM(self,hiddenNodes = [5,5]):
         # Initialise an DBM with random weights
         self.nHidden = sum(hiddenNodes)
+        self.hiddenLayerSizes = hiddenNodes
         self.hvWeights = np.random.normal(loc=0.0,scale=1e-3,size=(self.nVisible,self.nHidden))
         self.hhWeights = np.random.normal(loc=0.0,scale=1e-3,size=(self.nHidden,self.nHidden))
 
@@ -178,8 +194,7 @@ class QBMAgent:
         quadTerms = np.zeros((nFreeNodes,nFreeNodes))
         quadTerms[:self.nHidden,:self.nHidden] = -self.hhWeights
         if not freeAction:
-            Hamiltonian.add_linear_from_array(-np.matmul(np.transpose(self.hvWeights),observation))
-            Hamiltonian.add_quadratic_from_dense(quadTerms)
+            linearTerms = -np.matmul(np.transpose(self.hvWeights),observation)
         else:
             linearTerms = np.zeros((nFreeNodes,))
             linearTerms[:self.nHidden] = -np.matmul(np.transpose(self.hvWeights[:self.nObservations,:]),observation)
@@ -190,21 +205,36 @@ class QBMAgent:
             linearTerms[self.nHidden:] = -penaltyScale
             quadTerms[self.nHidden:,self.nHidden:] = np.triu(2 * penaltyScale * np.ones((self.nActions,self.nActions)),1)
 
-            Hamiltonian.add_linear_from_array(linearTerms)
-            Hamiltonian.add_quadratic_from_dense(quadTerms)
+        # Create block off-diagonal quadratic array
+        quadTermsBlock = np.zeros((nFreeNodes * self.nParallelAnneals,nFreeNodes * self.nParallelAnneals))
+        i0 = 0
+        for iP in range(self.nParallelAnneals):
+            i1 = i0 + nFreeNodes
+            quadTermsBlock[i0:i1,i0:i1] = quadTerms
+            i0 += nFreeNodes
+        Hamiltonian.add_linear_from_array(np.tile(linearTerms,self.nParallelAnneals))
+        Hamiltonian.add_quadratic_from_dense(quadTermsBlock)
 
         return Hamiltonian
 
     def calculateFreeEnergy(self,results,beta,Hamiltonian):
         # Take results from sampled hamiltonian and calculate mean free energy
 
+        # Drop copies of the hamiltonian
+        for v in range(self.nHidden,self.nHidden*self.nParallelAnneals):
+            Hamiltonian.remove_variable(v)
+
         # Add additional samples near the minima to help in calculating mean
         if self.AugmentSamples:
+            # Collate results from copies of the hamiltonian into equvalent results for the baseline hamiltonian
             if type(results) is list:
-                records = [[results,Hamiltonian.energy(results)]]
+                records = [[results[x*self.nHidden:(x+1)*self.nHidden],
+                            Hamiltonian.energy(results[x*self.nHidden:(x+1)*self.nHidden])] for x in range(self.nParallelAnneals)]
             else:
                 resAgg0 = results.aggregate()
                 records = resAgg0.record
+                records = [[record[0][x*self.nHidden:(x+1)*self.nHidden],
+                            Hamiltonian.energy(record[0][x*self.nHidden:(x+1)*self.nHidden])] for x in range(self.nParallelAnneals) for record in records]
             resAug = []
             sampAgg = []
             for record in records:
@@ -234,9 +264,18 @@ class QBMAgent:
             resAgg = [resAug[iU] for iU in uInds]
         else:
             if type(results) is list:
+                records = [[results[x*self.nHidden:(x+1)*self.nHidden],
+                            Hamiltonian.energy(results[x*self.nHidden:(x+1)*self.nHidden])] for x in range(self.nParallelAnneals)]
                 resAgg = [[results,Hamiltonian.energy(results)]]
             else:
+                resAgg0 = results.aggregate()
+                records = resAgg0.record
+                records = [[record[0][x*self.nHidden:(x+1)*self.nHidden],
+                            Hamiltonian.energy(record[0][x*self.nHidden:(x+1)*self.nHidden])] for x in range(self.nParallelAnneals) for record in records]
                 resAgg = results.aggregate().record
+            states = [record[0] for record in records]
+            _,uInds = np.unique(states,axis=0,return_index=True)
+            resAgg = [records[iU] for iU in uInds]
 
         # Calculate Zv
         HamAvg = 0.0
@@ -289,7 +328,6 @@ class QBMAgent:
 
         # Sample Hamiltonian and aggregate results
         results = self.sampleHamiltonian(Hamiltonian,SimulateAnneal)
-        nSamples = len(results.record)
 
         if action == []:
             # No action supplied, searching for the best choice of action
@@ -300,26 +338,77 @@ class QBMAgent:
         else:
             # Process results and calculate mean energy, h
             minusF, h = self.calculateFreeEnergy(results,self.beta,Hamiltonian)
+            self.evaluateSampleConvergence(results,self.beta,Hamiltonian)
             return minusF, h
+
+    def evaluateSampleConvergence(self,results,beta,Hamiltonian):
+        if self.step - self.lastConvergenceCheck < self.convergenceCheckInterval:
+            return # Skip unless interval has passed
+        self.lastConvergenceCheck = self.step
+
+
+        nSamples = len(results.record)
+        # Check for convergence
+        checkStep = round(0.05 * nSamples) # checking in blocks of 5 %
+        if (checkStep % 2 != 0):
+            checkStep += 1
+        convergenceTolerance = 0.01 # 1 percent tolerance of convergence
+        checkRange = int(np.ceil(nSamples/checkStep)) # currently checks all samples - adjust
+
+        energyVals = []
+        for i in range(checkRange):
+            # compare the average free energy in adjacent blocks of size checkStep
+            minusF, h = self.calculateFreeEnergy(results.truncate(np.min([checkStep*(i+1),nSamples])),self.beta,Hamiltonian) # check access of results
+            energyVals += [minusF]
+
+        relativeDifference = abs(energyVals-energyVals[-1])/energyVals[-1]
+        relativeDifferenceSmall = relativeDifference<convergenceTolerance
+        convergedIndex = min(idx for idx, val in enumerate(relativeDifferenceSmall) if val) + 1
+        convergedIndexPct = convergedIndex * checkStep / nSamples
+        if convergedIndexPct <= 0.4:
+            # Converged with less than 40% samples
+            self.numReads = np.max(int(self.numReads * 0.8),10) # Avoid numReads getting too small
+        if convergedIndexPct <= 0.6:
+            # Converged with 40-60% samples
+            self.numReads = np.max(int(self.numReads * 0.9),10) # Avoid numReads getting too small
+        elif convergedIndexPct >= 0.9:
+            # Converged with 90-100% samples, or hasn't converged
+            self.numReads = np.min(int(self.numReads * 1.2),500) # Avoid numReads getting too small
+        elif convergedIndexPct >= 0.8:
+            # Converged with 80-90% samples
+            self.numReads = np.min(int(self.numReads * 1.1),500) # Avoid numReads getting too small
+        self.numReads = round(self.numReads/10)*10
 
     def sampleHamiltonian(self,Hamiltonian,SimulateAnneal):
         if SimulateAnneal:
             beta0 = min(0.1,self.SAbeta/5)
-            results = self.simulatedSampler.sample(Hamiltonian,num_reads=self.annealNumReads,beta_range=[beta0, self.SAbeta])
+            results = self.simulatedSampler.sample(Hamiltonian,num_reads=self.numReads,beta_range=[beta0, self.SAbeta]) #num reads reduced by 10 for simulated
         else:
             nHidden = self.nHidden
             if self.batchSize is not None:
-                nHidden = self.nHidden * 2 * self.batchSize
+                nHidden = self.nHidden * 2 * self.batchSize * self.nParallelAnneals
             if len(Hamiltonian) == nHidden:
                 iSampler = 0
             else:
                 iSampler = 1 # If sampling for action, need two separate fixed embeddings
             try:
-                results = self.quantumSampler[iSampler].sample(Hamiltonian,num_reads=self.annealNumReads)
+                if not self.embeddingLoaded[iSampler]:
+                    embedding_name = 'hidden_'+'_'.join([str(x) for x in self.hiddenLayerSizes]) + \
+                        '_Batch_'+str(self.batchSize)+'_numParallel_'+str(self.nParallelAnneals)+'_sampler_'+str(iSampler)
+                    embedding_name = 'embeddings\\'+embedding_name+'.txt'
+                    if os.path.isfile(embedding_name):
+                        self.loadEmbedding(iSampler,embedding_name)
+                        self.embeddingLoaded[iSampler] = True
+
+                results = self.quantumSampler[iSampler].sample(Hamiltonian,num_reads=self.numReads)
+                if not self.embeddingLoaded[iSampler]:
+                    # Doesn't yet exist - save
+                    self.saveEmbedding(iSampler,embedding_name)
+                    self.embeddingLoaded[iSampler] = True
                 self.log.addQPUtime(results.info["timing"]["qpu_access_time"])
             except:
                 beta0 = min(0.1,self.SAbeta/5)
-                results = self.simulatedSampler.sample(Hamiltonian,num_reads=self.annealNumReads,beta_range=[beta0, self.SAbeta])
+                results = self.simulatedSampler.sample(Hamiltonian,num_reads=self.numReads,beta_range=[beta0, self.SAbeta])
                 self.log.QPUfail(self.step)
         return results
 
@@ -478,6 +567,8 @@ class QBMAgent:
         nSteps = int(nSteps)
         self.log.initNsteps(self,nSteps)
         for self.step in range(1,(nSteps+1)):
+            if self.log.QPUseconds * 60 >= self.maximumQPUminutes:
+                break
             # Get observation
             if done:
                 self.gameReward = 0
@@ -525,3 +616,19 @@ class QBMAgent:
             results.plotAll(showFigs=showFigs,saveFigs=saveFigs)
         if storeMeta:
             results.saveMetadata()
+
+    def loadEmbedding(self,index:int=0,fileName:str=''):
+        # Load minor embedding for problem if it is already saved within the run folder
+        self.embeddingLoaded[index] = True
+        with open(fileName, 'r') as file:
+            embedding = json.loads(file.read())
+        self.quantumSampler[index] = FixedEmbeddingComposite(DWaveSampler(),embedding=embedding)
+
+    def saveEmbedding(self,index:int=0,fileName:str=''):
+        # Save calculated minor embedding for problem within the run folder
+        if not os.path.isdir(os.path.dirname(fileName)):
+            os.mkdir(os.path.dirname(fileName))
+        embedding = self.quantumSampler[index].structure
+        # embedding.savetxt(fileName)
+        with open(fileName, 'w') as file:
+            file.write(json.dumps(embedding))

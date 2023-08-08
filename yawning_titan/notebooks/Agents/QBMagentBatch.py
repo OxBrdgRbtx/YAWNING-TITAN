@@ -24,15 +24,14 @@ class QBMBatchAgent(QBMAgent):
         elif maxBits>0:
             self.batchSize = int(maxBits/(self.nHidden*2))
         if maxBits>0 and batchSize>0:
-            if self.nHidden * self.batchSize * 2 > maxBits:
-                print(f'Warning: batchSize * (number of hidden units * 2) ({self.nHidden * self.batchSize * 2}) is larger than the maximum number of bits ({maxBits})')
+            if self.nHidden * self.batchSize * 2 * self.nParallelAnneals > maxBits:
+                print(f'Warning: batchSize * (number of hidden units * 2) * (number of parallel anneals)) ({self.nHidden * self.batchSize * 2 * self.nParallelAnneals}) is larger than the maximum number of bits ({maxBits})')
         
         self.batchRewards = np.zeros((self.batchSize,))
         self.batchStates  = np.zeros((self.batchSize,self.nObservations))
         self.batchStates2  = np.zeros((self.batchSize,self.nObservations))
         self.batchActions = np.zeros((self.batchSize,self.nActions))
         self.batchActions2 = np.zeros((self.batchSize,self.nActions))
-
 
     def updateWeights(self,reward,Q1,Q2,state,action,h,state_,action_):
         # Get step modulo batch size and store states/actions
@@ -59,7 +58,7 @@ class QBMBatchAgent(QBMAgent):
     def evaluateQBMbatch(self):
         
         # Initialise Hamiltonian and arrays for individual Hamiltonians
-        nQubits = self.nHidden * self.batchSize * 2
+        nQubits = self.nHidden * self.batchSize * 2 * self.nParallelAnneals
         Hamiltonian = BinaryQuadraticModel(nQubits, 'BINARY')
 
         HamiltonianArray = np.zeros((nQubits,nQubits))
@@ -69,12 +68,12 @@ class QBMBatchAgent(QBMAgent):
             thisHamiltonian2 = self.buildHamiltonian(self.batchStates2[iQ,:],self.batchActions2[iQ,:])
 
             # Stitch individual Hamiltonians together 
-            i0 = self.nHidden * iQ * 2
-            i1 = i0 + self.nHidden
+            i0 = self.nHidden * self.nParallelAnneals * iQ * 2
+            i1 = i0 + self.nHidden * self.nParallelAnneals
             HamiltonianArray[i0:i1,i0:i1] = thisHamiltonian.to_numpy_matrix()
 
-            i0 += self.nHidden
-            i1 += self.nHidden
+            i0 += self.nHidden * self.nParallelAnneals
+            i1 += self.nHidden * self.nParallelAnneals
             HamiltonianArray[i0:i1,i0:i1] = thisHamiltonian2.to_numpy_matrix()
 
         # Sample batched Hamiltonian
@@ -91,8 +90,8 @@ class QBMBatchAgent(QBMAgent):
 
         for iQ in range(self.batchSize):
             # Extract relevant hamiltonian for Q1
-            i0 = self.nHidden * iQ * 2
-            i1 = i0 + self.nHidden
+            i0 = self.nHidden * iQ * 2 * self.nParallelAnneals
+            i1 = i0 + self.nHidden * self.nParallelAnneals
             thisHamiltonian= BinaryQuadraticModel.from_numpy_matrix(HamiltonianArray[i0:i1,i0:i1])
             # Get Q, h for this hamiltonian
             if thisHamiltonian.is_linear() and self.explicitRBM:
@@ -102,10 +101,11 @@ class QBMBatchAgent(QBMAgent):
                 theseSamples = results.iloc[:,i0:i1]
                 theseResults = SampleSet.from_samples(theseSamples,'BINARY',thisHamiltonian.energies(theseSamples))
                 Q1array[iQ], harray[iQ] = self.calculateFreeEnergy(theseResults,self.beta,thisHamiltonian)
-            
+                self.evaluateSampleConvergence(theseResults,self.beta,thisHamiltonian)
+
             # Extract relevant hamiltonian for Q2
-            i0 += self.nHidden
-            i1 += self.nHidden
+            i0 += self.nHidden * self.nParallelAnneals
+            i1 += self.nHidden * self.nParallelAnneals
             thisHamiltonian= BinaryQuadraticModel.from_numpy_matrix(HamiltonianArray[i0:i1,i0:i1])
             # Get Q for this hamiltonian
             if thisHamiltonian.is_linear() and self.explicitRBM:
