@@ -103,7 +103,6 @@ class QBMAgent:
         # Augment sample options
         # For each sampled state, create copies of the state, where each node is switched, and each pair of nodes is switched
         self.AugmentSamples = AugmentSamples
-        self.augmentPswitch = augmentPswitch# Probability of each individual node switching
         self.nParallelAnneals = nParallelAnneals # Number of parallel solves of the same Hamiltonian
         
         # Number of reads and convergence check options
@@ -398,8 +397,6 @@ class QBMAgent:
                     embedding_name = 'embeddings\\'+embedding_name+'.txt'
                     if os.path.isfile(embedding_name):
                         self.loadEmbedding(iSampler,embedding_name)
-                        self.embeddingLoaded[iSampler] = True
-
                 results = self.quantumSampler[iSampler].sample(Hamiltonian,num_reads=self.numReads)
                 if not self.embeddingLoaded[iSampler]:
                     # Doesn't yet exist - save
@@ -622,13 +619,15 @@ class QBMAgent:
         self.embeddingLoaded[index] = True
         with open(fileName, 'r') as file:
             embedding = json.loads(file.read())
-        self.quantumSampler[index] = FixedEmbeddingComposite(DWaveSampler(),embedding=embedding)
+        embedding_ = {int(key):embedding[key] for key in list(embedding.keys())}
+        self.quantumSampler[index] = FixedEmbeddingComposite(DWaveSampler(),embedding=embedding_)
+        self.embeddingLoaded[index] = True
 
     def saveEmbedding(self,index:int=0,fileName:str=''):
         # Save calculated minor embedding for problem within the run folder
         if not os.path.isdir(os.path.dirname(fileName)):
             os.mkdir(os.path.dirname(fileName))
-        embedding = self.quantumSampler[index].structure
-        # embedding.savetxt(fileName)
+        embedding = self.quantumSampler[index].embedding.items()
+
         with open(fileName, 'w') as file:
             file.write(json.dumps(embedding))

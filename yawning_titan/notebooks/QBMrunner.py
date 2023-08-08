@@ -29,14 +29,14 @@ _ = env.reset()
 #%% Set scenario baselines
 nSteps = int(2.5e5)
 printRate = 10000 # nSteps between printing to log/terminal
-dbmSize = [8,8] # DBM shape, RBM is set up to have equal number of hidden nodes
-epsilon = 0.1
+dbmSize = [16,16] # DBM shape, RBM is set up to have equal number of hidden nodes
+epsilon = 0.01
+numReads = 200
 gamma = 0.95
 pRandomDecay = 0.99
 minPrandom = 0.05
-name = '25e4_16Units'
-longName = '1e6_16Units'
-longRBMscale = 4
+name = '25e4_32Units'
+nParallelAnneals = 100
 
 # %% Build an RBM agent and learn via explicit calculation
 agent = QBMAgent(env,'FullRuns\\RBM_'+name,
@@ -51,26 +51,9 @@ agent.exportResults()
 agent = QBMBatchAgent(env,'FullRuns\\QBM_'+name+'QuantumBatch',
               epsilon=epsilon,gamma=gamma,printRate=printRate,
               pRandomDecay=pRandomDecay,minPrandom=minPrandom,SimulateAnneal=False,
-              SimulateAnnealForAction=False,AnnealToBestAction=False,writeWeights=True)
+              SimulateAnnealForAction=False,AnnealToBestAction=False,writeWeights=True,
+              maximumQPUminutes=60*5,numReads=numReads,nParallelAnneals=nParallelAnneals)
 agent.setBatchSize(batchSize=1)
-agent.initDBM(dbmSize)
-agent.learn(nSteps=nSteps)
-agent.exportResults()
-
-agent = QBMAgent(env,'FullRuns\\RBM_'+longName,
-                 epsilon=epsilon,gamma=gamma,printRate=printRate*longRBMscale,
-                 pRandomDecay=pRandomDecay,minPrandom=minPrandom,
-                 writeWeights=True)
-agent.initRBM(sum(dbmSize))
-agent.learn(nSteps=nSteps*longRBMscale)
-agent.exportResults()
-
-#%% Build a DBM agent and learn via batched Quantum Annealing
-agent = QBMAgent(env,'FullRuns\\Simulated_QBM_'+name+'QuantumBatch_aug2',
-              epsilon=epsilon,gamma=gamma,printRate=printRate/10,
-              pRandomDecay=pRandomDecay,minPrandom=minPrandom,SimulateAnneal=True,
-              SimulateAnnealForAction=True,AnnealToBestAction=False,writeWeights=True)
-# agent.setBatchSize(batchSize=1)
 agent.initDBM(dbmSize)
 agent.learn(nSteps=nSteps)
 agent.exportResults()
