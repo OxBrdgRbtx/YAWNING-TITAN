@@ -220,8 +220,9 @@ class QBMAgent:
         # Take results from sampled hamiltonian and calculate mean free energy
 
         # Drop copies of the hamiltonian
-        for v in range(self.nHidden,self.nHidden*self.nParallelAnneals):
-            Hamiltonian.remove_variable(v)
+        if len(Hamiltonian)>self.nHidden:
+            for v in range(self.nHidden,self.nHidden*self.nParallelAnneals):
+                Hamiltonian.remove_variable(v)
 
         # Add additional samples near the minima to help in calculating mean
         if self.AugmentSamples:
@@ -249,15 +250,15 @@ class QBMAgent:
                     resAug += [[thisSamp,thisEnergy]]
                     sampAgg += [thisSamp]
 
-                    # Then flip pairs of bits
-                    for iFlip2 in range(iFlip+1,self.nHidden):
-                        flipBit = np.zeros(self.nHidden)
-                        flipBit[iFlip] = 1
-                        flipBit[iFlip2] = 1
-                        thisSamp = np.mod(record[0] + flipBit,2)
-                        thisEnergy = Hamiltonian.energy(thisSamp)
-                        resAug += [[thisSamp,thisEnergy]]
-                        sampAgg += [thisSamp]
+                    # # Then flip pairs of bits
+                    # for iFlip2 in range(iFlip+1,self.nHidden):
+                    #     flipBit = np.zeros(self.nHidden)
+                    #     flipBit[iFlip] = 1
+                    #     flipBit[iFlip2] = 1
+                    #     thisSamp = np.mod(record[0] + flipBit,2)
+                    #     thisEnergy = Hamiltonian.energy(thisSamp)
+                    #     resAug += [[thisSamp,thisEnergy]]
+                    #     sampAgg += [thisSamp]
                 
             _,uInds = np.unique(np.array(sampAgg),axis=0,return_index=True)
             resAgg = [resAug[iU] for iU in uInds]
@@ -349,8 +350,8 @@ class QBMAgent:
         nSamples = len(results.record)
         # Check for convergence
         checkStep = round(0.05 * nSamples) # checking in blocks of 5 %
-        if (checkStep % 2 != 0):
-            checkStep += 1
+        if (checkStep == 0):
+            checkStep = 1
         convergenceTolerance = 0.01 # 1 percent tolerance of convergence
         checkRange = int(np.ceil(nSamples/checkStep)) # currently checks all samples - adjust
 
@@ -366,24 +367,24 @@ class QBMAgent:
         convergedIndexPct = convergedIndex * checkStep / nSamples
         if convergedIndexPct <= 0.4:
             # Converged with less than 40% samples
-            self.numReads = np.max(int(self.numReads * 0.8),10) # Avoid numReads getting too small
+            self.numReads = max(int(self.numReads * 0.8),10) # Avoid numReads getting too small
         if convergedIndexPct <= 0.6:
             # Converged with 40-60% samples
-            self.numReads = np.max(int(self.numReads * 0.9),10) # Avoid numReads getting too small
+            self.numReads = max(int(self.numReads * 0.9),10) # Avoid numReads getting too small
         elif convergedIndexPct >= 0.9:
             # Converged with 90-100% samples, or hasn't converged
-            self.numReads = np.min(int(self.numReads * 1.2),500) # Avoid numReads getting too small
+            self.numReads = min(int(self.numReads * 1.2),500) # Avoid numReads getting too small
         elif convergedIndexPct >= 0.8:
             # Converged with 80-90% samples
-            self.numReads = np.min(int(self.numReads * 1.1),500) # Avoid numReads getting too small
-        self.numReads = round(self.numReads/10)*10
+            self.numReads = min(int(self.numReads * 1.1),500) # Avoid numReads getting too small
+        self.numReads = round(self.numReads)
 
     def sampleHamiltonian(self,Hamiltonian,SimulateAnneal):
         if SimulateAnneal:
             beta0 = min(0.1,self.SAbeta/5)
             results = self.simulatedSampler.sample(Hamiltonian,num_reads=self.numReads,beta_range=[beta0, self.SAbeta]) #num reads reduced by 10 for simulated
         else:
-            nHidden = self.nHidden
+            nHidden = self.nHidden * self.nParallelAnneals
             if self.batchSize is not None:
                 nHidden = self.nHidden * 2 * self.batchSize * self.nParallelAnneals
             if len(Hamiltonian) == nHidden:
@@ -392,8 +393,12 @@ class QBMAgent:
                 iSampler = 1 # If sampling for action, need two separate fixed embeddings
             try:
                 if not self.embeddingLoaded[iSampler]:
-                    embedding_name = 'hidden_'+'_'.join([str(x) for x in self.hiddenLayerSizes]) + \
-                        '_Batch_'+str(self.batchSize)+'_numParallel_'+str(self.nParallelAnneals)+'_sampler_'+str(iSampler)
+                    if self.batchSize is None:    
+                        embedding_name = 'hidden_'+'_'.join([str(x) for x in self.hiddenLayerSizes]) + \
+                            '_numParallel_'+str(self.nParallelAnneals)+'_sampler_'+str(iSampler)
+                    else:
+                        embedding_name = 'hidden_'+'_'.join([str(x) for x in self.hiddenLayerSizes]) + \
+                            '_Batch_'+str(self.batchSize)+'_numParallel_'+str(self.nParallelAnneals)+'_sampler_'+str(iSampler)
                     embedding_name = 'embeddings\\'+embedding_name+'.txt'
                     if os.path.isfile(embedding_name):
                         self.loadEmbedding(iSampler,embedding_name)
@@ -404,6 +409,8 @@ class QBMAgent:
                     self.embeddingLoaded[iSampler] = True
                 self.log.addQPUtime(results.info["timing"]["qpu_access_time"])
             except:
+                if not self.embeddingLoaded[iSampler]:
+                    print(e_for_error)
                 beta0 = min(0.1,self.SAbeta/5)
                 results = self.simulatedSampler.sample(Hamiltonian,num_reads=self.numReads,beta_range=[beta0, self.SAbeta])
                 self.log.QPUfail(self.step)
@@ -564,7 +571,7 @@ class QBMAgent:
         nSteps = int(nSteps)
         self.log.initNsteps(self,nSteps)
         for self.step in range(1,(nSteps+1)):
-            if self.log.QPUseconds * 60 >= self.maximumQPUminutes:
+            if self.log.QPUseconds >= self.maximumQPUminutes * 60 :
                 break
             # Get observation
             if done:
@@ -627,7 +634,7 @@ class QBMAgent:
         # Save calculated minor embedding for problem within the run folder
         if not os.path.isdir(os.path.dirname(fileName)):
             os.mkdir(os.path.dirname(fileName))
-        embedding = self.quantumSampler[index].embedding.items()
+        embedding = self.quantumSampler[index].embedding
 
         with open(fileName, 'w') as file:
             file.write(json.dumps(embedding))
