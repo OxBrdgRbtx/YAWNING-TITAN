@@ -61,3 +61,18 @@ agent.setBatchSize(batchSize=1)
 agent.initDBM(dbmSize)
 agent.learn(nSteps=nSteps)
 agent.exportResults()
+
+name = '5e4_256Units'
+dbmSize = [128,128]
+epsilons = [0.1,0.01,0.001]
+nSteps = 50000
+for iE in range(3):
+    epsilon = epsilons[iE]
+    name = '5e4_256Units_Eps_E-'+str(iE+1)
+    agent = QBMAgent(env,'FullRuns\\RBM_'+name,
+                    epsilon=epsilon,gamma=gamma,printRate=printRate,
+                    pRandomDecay=pRandomDecay,minPrandom=minPrandom,
+                    writeWeights=True)
+    agent.initRBM(sum(dbmSize))
+    agent.learn(nSteps=nSteps)
+    agent.exportResults()

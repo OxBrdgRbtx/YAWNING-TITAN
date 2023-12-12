@@ -41,7 +41,7 @@ class QBMAgent:
         adaptiveGradient:bool=True,explicitRBM:bool=True, # Annealing flags
         AugmentSamples:bool=True,nParallelAnneals:int=1, # Sampling assistance options
         numReads:int=100,convergenceCheckInterval:int=200, # Sample size options
-        maximumQPUminutes:float=60): 
+        maximumQPUminutes:float=60,DWave_solver='Advantage_system4.1'): 
 
 
         self.env = env
@@ -93,13 +93,15 @@ class QBMAgent:
         if SimulateAnneal or SimulateAnnealForAction:
             if (not SimulateAnneal) or (not SimulateAnnealForAction):
                 # First if case makes this exclusive OR
-                self.quantumSampler = [LazyFixedEmbeddingComposite(DWaveSampler())]
+                self.quantumSampler = [LazyFixedEmbeddingComposite(DWaveSampler(solver=DWave_solver))]
                 self.embeddingLoaded = [False]
+                self.DWave_solver = DWave_solver
         else:
             # (not SimulateAnneal) AND (not SimulateAnnealForAction)
             # Need two different embeddings
-            self.quantumSampler = [LazyFixedEmbeddingComposite(DWaveSampler()), LazyFixedEmbeddingComposite(DWaveSampler())]
+            self.quantumSampler = [LazyFixedEmbeddingComposite(DWaveSampler(solver=DWave_solver)), LazyFixedEmbeddingComposite(DWaveSampler(solver=DWave_solver))]
             self.embeddingLoaded = [False,False]
+            self.DWave_solver = DWave_solver
         # Augment sample options
         # For each sampled state, create copies of the state, where each node is switched, and each pair of nodes is switched
         self.AugmentSamples = AugmentSamples
@@ -114,7 +116,7 @@ class QBMAgent:
         self.maximumQPUminutes = maximumQPUminutes # maximum QPU time to spend
 
         # Set Stored Q maximums
-        self.storeQ = self.nObservations<22
+        self.storeQ = self.nObservations<26
         if not self.AnnealToBestAction and not self.storeQ:
             print('Warning: too many observables to store Q values. ''AnnealToBestAction'' flag has been set to ''True''')
             self.AnnealToBestAction = True
@@ -138,8 +140,8 @@ class QBMAgent:
         # Initialise an DBM with random weights
         self.nHidden = sum(hiddenNodes)
         self.hiddenLayerSizes = hiddenNodes
-        self.hvWeights = np.random.normal(loc=0.0,scale=1e-3,size=(self.nVisible,self.nHidden))
-        self.hhWeights = np.random.normal(loc=0.0,scale=1e-3,size=(self.nHidden,self.nHidden))
+        self.hvWeights = np.random.normal(loc=0.0,scale=1,size=(self.nVisible,self.nHidden))
+        self.hhWeights = np.random.normal(loc=0.0,scale=1,size=(self.nHidden,self.nHidden))
 
         self.nonzeroHV = np.zeros_like(self.hvWeights)
         self.nonzeroHV[0:self.nObservations,0:hiddenNodes[0]] = 1
@@ -154,6 +156,11 @@ class QBMAgent:
             self.nonzeroHH[cumsum0:cumsum1,cumsum1:(cumsum1+hiddenNodes[iH+1])] = 1
             cumsum0 = cumsum1
         self.hhWeights = np.multiply(self.hhWeights,self.nonzeroHH)
+
+        # Scale weights so initial free energy is between -1 and 1
+        scale = np.sum(np.abs(self.hhWeights)) + np.sum(np.abs(self.hvWeights))
+        self.hvWeights = self.hvWeights / scale
+        self.hhWeights = self.hhWeights / scale
 
         self.QBMinitialised = True
 
@@ -282,21 +289,52 @@ class QBMAgent:
         entropy = 0.0
         Zv = 0.0
         h = np.zeros((self.nHidden,self.nHidden))
-        minEnergy = min([record[1] for record in resAgg]) # Stop overflowing exp
-        for record in resAgg:
-            Zv += np.exp(-(record[1]-minEnergy) * beta)
+        energies = [record[1] for record in resAgg]
+        minEnergy = min(energies) # Stop overflowing exp
+
+        # Get proportional probability for all samples, sum for scalar
+        proportionalProbability = np.exp(-(energies-minEnergy) * beta)
+        this_Zv = proportionalProbability.sum()
+
+        # Filter samples with negligible probabilities
+        keepSamples = proportionalProbability/this_Zv > (1e-5/len(energies))
+        resAgg = [record for record,keep in zip(resAgg,keepSamples) if keep]
+        proportionalProbability = [thisP for thisP,keep in zip(proportionalProbability,keepSamples) if keep]
+        Zv = np.sum(proportionalProbability)
 
         # For each record, calculate probability, mean hamiltonian contribution,
         # entropy contribution and h interaction contributions
+        
+        # theseProbabilities = proportionalProbability / Zv
+        # theseEnergies = [record[1] for record in resAgg]
+
+        # HamAvg = np.dot(theseProbabilities,theseEnergies)
+        # entropy = np.sum(theseProbabilities * np.log(theseProbabilities))
+        # theseSamples = []
+        # for iH in range(self.nHidden):
+        #     theseSamples += [[record[0][iH] for record in resAgg]]
+        # for iH in range(self.nHidden):
+        #     h[iH,iH] = np.dot(theseProbabilities,theseSamples[iH])
+        #     for iH2 in range(iH+1,self.nHidden):
+        #         theseSamples_ = [record[0][iH2] for record in resAgg]
+        #         h[iH,iH2] = np.dot(theseProbabilities,np.multiply(theseSamples[iH], theseSamples[iH2]))
+                
         for record in resAgg:
             pEnergy = np.exp(-(record[1]-minEnergy) * beta)/Zv
-
             HamAvg += record[1] * pEnergy
             entropy += pEnergy * np.log(pEnergy)
-            for iH in range(self.nHidden):
-                h[iH,iH] += pEnergy * record[0][iH]
-                for iH2 in range(iH+1,self.nHidden):
-                    h[iH,iH2] += pEnergy * record[0][iH] * record[0][iH2]
+            h += pEnergy * np.diag(record[0])
+            h += pEnergy * np.multiply(np.outer(record[0],record[0]),self.nonzeroHH)
+
+        # for record in resAgg:
+        #     pEnergy = np.exp(-(record[1]-minEnergy) * beta)/Zv
+        #     if pEnergy>0:
+        #         HamAvg += record[1] * pEnergy
+        #         entropy += pEnergy * np.log(pEnergy)
+        #         for iH in range(self.nHidden):
+        #             h[iH,iH] += pEnergy * record[0][iH]
+        #             for iH2 in range(iH+1,self.nHidden):
+        #                 h[iH,iH2] += pEnergy * record[0][iH] * record[0][iH2]
 
         minusF = - HamAvg - 1/beta * entropy
         return minusF, h
@@ -367,22 +405,22 @@ class QBMAgent:
         convergedIndexPct = convergedIndex * checkStep / nSamples
         if convergedIndexPct <= 0.4:
             # Converged with less than 40% samples
-            self.numReads = max(int(self.numReads * 0.8),10) # Avoid numReads getting too small
+            self.numReads = max(int(self.numReads * 0.8),50) # Avoid numReads getting too small
         if convergedIndexPct <= 0.6:
             # Converged with 40-60% samples
-            self.numReads = max(int(self.numReads * 0.9),10) # Avoid numReads getting too small
+            self.numReads = max(int(self.numReads * 0.9),50) # Avoid numReads getting too small
         elif convergedIndexPct >= 0.9:
             # Converged with 90-100% samples, or hasn't converged
-            self.numReads = min(int(self.numReads * 1.2),500) # Avoid numReads getting too small
+            self.numReads = min(int(self.numReads * 1.2),500) # Avoid numReads getting too large
         elif convergedIndexPct >= 0.8:
             # Converged with 80-90% samples
-            self.numReads = min(int(self.numReads * 1.1),500) # Avoid numReads getting too small
+            self.numReads = min(int(self.numReads * 1.1),500) # Avoid numReads getting too large
         self.numReads = round(self.numReads)
 
     def sampleHamiltonian(self,Hamiltonian,SimulateAnneal):
         if SimulateAnneal:
             beta0 = min(0.1,self.SAbeta/5)
-            results = self.simulatedSampler.sample(Hamiltonian,num_reads=self.numReads,beta_range=[beta0, self.SAbeta]) #num reads reduced by 10 for simulated
+            results = self.simulatedSampler.sample(Hamiltonian,num_reads=self.numReads,beta_range=[beta0, self.SAbeta],num_sweeps=20) 
         else:
             nHidden = self.nHidden * self.nParallelAnneals
             if self.batchSize is not None:
@@ -399,7 +437,7 @@ class QBMAgent:
                     else:
                         embedding_name = 'hidden_'+'_'.join([str(x) for x in self.hiddenLayerSizes]) + \
                             '_Batch_'+str(self.batchSize)+'_numParallel_'+str(self.nParallelAnneals)+'_sampler_'+str(iSampler)
-                    embedding_name = 'embeddings\\'+embedding_name+'.txt'
+                    embedding_name = 'embeddings\\'+self.DWave_solver+'\\'+embedding_name+'.txt'
                     if os.path.isfile(embedding_name):
                         self.loadEmbedding(iSampler,embedding_name)
                 results = self.quantumSampler[iSampler].sample(Hamiltonian,num_reads=self.numReads)
@@ -412,7 +450,7 @@ class QBMAgent:
                 if not self.embeddingLoaded[iSampler]:
                     print(e_for_error)
                 beta0 = min(0.1,self.SAbeta/5)
-                results = self.simulatedSampler.sample(Hamiltonian,num_reads=self.numReads,beta_range=[beta0, self.SAbeta])
+                results = self.simulatedSampler.sample(Hamiltonian,num_reads=self.numReads,beta_range=[beta0, self.SAbeta],num_sweeps=20)
                 self.log.QPUfail(self.step)
         return results
 
@@ -571,12 +609,16 @@ class QBMAgent:
         nSteps = int(nSteps)
         self.log.initNsteps(self,nSteps)
         for self.step in range(1,(nSteps+1)):
+            # Render
+
             if self.log.QPUseconds >= self.maximumQPUminutes * 60 :
                 break
             # Get observation
             if done:
                 self.gameReward = 0
                 self.gameSteps = 0
+                # if self.log.nGames % 10 == 0:
+                #     self.render()
                 
             state1 = state2
 
@@ -588,6 +630,8 @@ class QBMAgent:
 
             # Do action, returns reward and new state
             state2, reward, done, notes = self.env.step(actionI1)
+            # if self.log.nGames % 10 == 0:
+            #     self.render()
             if done:
                 state2 = self.env.reset()
 
@@ -638,3 +682,13 @@ class QBMAgent:
 
         with open(fileName, 'w') as file:
             file.write(json.dumps(embedding))
+
+    def render(self):
+        resultsFol = self.log.resultsDir+'\\Game_'+str(self.log.nGames+1)
+        if not os.path.isdir(resultsFol):
+            os.mkdir(resultsFol)
+        self.env.render()
+        self.env.graph_plotter.fig.savefig(resultsFol + \
+                                    '\\Step_'+str(self.env.current_duration)+'.png')
+
+

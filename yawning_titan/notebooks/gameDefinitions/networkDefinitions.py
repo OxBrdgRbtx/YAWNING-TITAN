@@ -73,6 +73,58 @@ def get10NodeNetwork(settings):
 def get18NodeNetwork(settings):
     matrix, nodePositions = network_creator.create_18_node_network() 
 
+    entryNodes = ['12', '5']
+    highValueNodes = '10'
+
     network_config = NetworkInterface(matrix=matrix,
         positions=nodePositions,
+        entry_nodes=entryNodes,
+        high_value_target=highValueNodes,
         settings_path=settings)
+    return network_config   
+
+
+def get24NodeNetwork(settings):
+    matrix_, nodePositions = network_creator.create_18_node_network() 
+
+    nodePositions['18'] = [1,5]
+    nodePositions['19'] = [2,5]
+    nodePositions['20'] = [4,5]
+    nodePositions['21'] = [1,3]
+    nodePositions['22'] = [2,3] 
+    nodePositions['23'] = [4,3]
+    
+    matrix = np.zeros((24,24))
+    matrix[0:18,0:18] = matrix_
+    for ii in [6, 19]:
+        matrix[18,ii] = 1
+        matrix[ii,18] = 1
+    for ii in [18, 5, 7]:
+        matrix[19,ii] = 1
+        matrix[ii,19] = 1
+    for ii in [5, 7, 8, 9]:
+        matrix[20,ii] = 1
+        matrix[ii,20] = 1    
+    for ii in [6,22]:
+        matrix[21,ii] = 1
+        matrix[ii,21] = 1
+    for ii in [21,12,7]:
+        matrix[22,ii] = 1
+        matrix[ii,22] = 1
+    for ii in [12,7,8,11]:
+        matrix[23,ii] = 1
+        matrix[ii,23] = 1        
+
+
+
+    entryNodes = ['12', '5']
+    highValueNodes = '10'
+
+
+
+    network_config = NetworkInterface(matrix=matrix,
+        positions=nodePositions,
+        entry_nodes=entryNodes,
+        high_value_target=highValueNodes,
+        settings_path=settings)
+    return network_config   
